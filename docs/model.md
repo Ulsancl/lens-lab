@@ -87,3 +87,42 @@ node --test tests/physics.test.mjs tests/projection.test.mjs
 ```
 
 물리·투영 단위 검사는 광학 관계와 수치 적분을 확인합니다. 실제 앱의 조작, 3D 텍스처 방향, 파일 저장, 설치 동작과 시각적 가독성은 별도의 통합 검사가 필요합니다.
+
+## 1.1 상세 관찰: 출사 광선과 스크린 위치 허용 범위
+
+`src/detail-model.js`는 기존 해의 관찰값만 도출합니다. 모형 식별자, 네 광학 입력, 저장 형식과 투영 버퍼 계산은 바꾸지 않습니다. 모든 길이는 기존 광학 API와 같이 mm이며, 3D 외형에서 가져온 치수만 m에서 mm로 변환합니다.
+
+`lensDetail(config, solution = solveOptics(config), {blurRadiusLimitMm = 0.1} = {})`는 정확한 설정과 그 설정의 해가 일치하는지 검증하고 다음 독립 객체를 반환합니다. 설정·해를 수정하거나 범위 밖 입력을 보정하지 않습니다.
+
+| 객체 | 필드와 의미 |
+| --- | --- |
+| `aperture` | `diameterMm`, `radiusMm`, `areaMm2 = π(D/2)²`, `fNumber = f/D` |
+| `bundle` | `kind: converging / parallel / diverging`, 부호 있는 `vergencePerMm = q` |
+| `image` | 기존 `kind`, `distanceMm`, `magnification`, `onBench`의 복사본과 `realFocusOnRail` |
+| `screen` | `distanceMm`, 부호 있는 `pupilScale = C`, `centerScale = B`, `blurRadiusMm`, `blurDiameterMm` |
+| `light` | 기존 `collectedRelative`와 `irradianceScale`의 복사본 |
+| `focusTolerance` | `blurRadiusLimitMm`, `pupilScaleLimit`, `forwardRangeMm`, `railRangeMm`, `railWidthMm`, `containsScreen` |
+
+출사 광선의 수렴도는 `q = 1/f − 1/u = (u−f)/(fu)`입니다. 계산은 u≈f에서 거의 같은 역수의 차를 피하기 위해 뒤 식을 사용합니다. 같은 표적점에서 나온 광선에 대해 q>0은 렌즈 뒤 수렴, q=0은 평행, q<0은 발산을 뜻합니다. 서로 다른 표적점의 평행 광선 방향이 같다는 뜻은 아닙니다. `screen.pupilScale`은 기존 해의 `1+s/u−s/f`를 그대로 사용하며, 이상적인 관계에서는 `C = 1−sq`입니다. 스크린이 실상 초점면을 지난 경우 C의 부호가 바뀌지만 렌즈에서 출사하는 광선의 분류 q는 바뀌지 않습니다.
+
+흐림 **반지름** 기준 c에 대해 허용 스크린 위치는 다음 부등식으로 정합니다.
+
+```text
+ε = 2c/D
+b(s) ≤ c  ⇔  |1−sq| ≤ ε
+q > 0:  (1−ε)/q ≤ s ≤ (1+ε)/q
+```
+
+`forwardRangeMm`는 위 부등식의 s≥0 부분이고, `railRangeMm`는 다시 실제 스크린 이동 범위 [100,900] mm와 교차한 구간입니다. 구간은 `{minMm,maxMm}`, 없으면 `null`입니다. 레일 안 구간 폭은 없으면 0이며, 상의 위치 v 자체는 레일 끝으로 자르지 않습니다. 실상 초점이 900 mm보다 조금 멀어도 그 앞쪽 허용 구간이 레일에 걸칠 수 있습니다. 반대로 기존 `image.onBench`는 |v|≤900 조건이므로 허상에도 참일 수 있습니다. `realFocusOnRail`은 실상 여부와 실제 스크린 범위를 함께 확인합니다.
+
+앱의 고정 기준 c=0.1 mm는 모든 지원 구경의 반지름보다 작습니다. 따라서 u=f의 평행 광선과 u<f의 발산 광선에는 허용 전방 스크린 구간이 없습니다. API 자체는 유한한 0 이상의 다른 기준도 정확히 처리합니다. ε≥1이면 q=0에서 전방 전체가 허용되고, q<0에서는 `0 ≤ s ≤ (ε−1)/(−q)`가 됩니다. 전방 구간의 무한 상한은 `maxMm:null`로 나타내며 레일과 교차한 구간은 항상 유한합니다. `containsScreen`은 현재 반지름을 기준과 비교할 때 원래 C 계산의 상쇄에서 생기는 부동소수점 오차만 허용합니다. 표시 반올림이나 래스터 해상도로 허용 구간을 늘리지 않습니다.
+
+기본 f=150, u=300, D=18 mm에서 허용 스크린 위치는 약 296.666667–303.333333 mm입니다. D=6 mm로 바꾸면 290–310 mm로 넓어지며 수집 광량은 1/9로 줄어듭니다. 이는 **현재 물체거리를 고정한 스크린 위치 허용 범위**입니다. 물체거리의 피사계심도, 회절 한계나 실제 렌즈 해상도가 아닙니다. 명목 f/D 역시 유한 물체거리·현재 스크린 분포를 생략한 실제 밝기나 수치개구를 뜻하지 않습니다.
+
+`describeLensDetail(partId, config, solution)`는 14개 부품 각각에 최대 6개의 `{label,value,unit,digits}`와 `note`를 반환합니다. 이상 상의 배율 m과 현재 스크린의 중심 배율 B, 상대 수집 광량과 선형 영상에 곱하는 배율 인자를 구분합니다. 무한대의 상 위치·배율은 숫자 무한대를 만들지 않고 설명 문자열로 표시합니다. 전원선에는 계산하지 않는 전압·전류·광원 출력값을 추가하지 않습니다.
+
+새 검사는 광선 중심·동공 경계에서 상세값을 재구성하고, 허용 구간 양 끝과 바깥의 광선 간격, 레일 밖 초점, 초점거리의 바로 이웃 부동소수점 입력, 구경의 면적·광량·허용 폭 관계, 선형 래스터 적분과 잘림, 동결 입력과 반환 객체의 독립성을 확인합니다.
+
+```sh
+node --test tests/physics.test.mjs tests/projection.test.mjs tests/geometry.test.mjs tests/detail-model.test.mjs
+```

@@ -55,6 +55,9 @@ jobs:
       - name: Verify source desktop app
         timeout-minutes: 10
         run: npm run test:desktop
+      - name: Verify optical detail observations and geometry
+        timeout-minutes: 10
+        run: npm run test:detail
       - name: Package Windows installer
         run: npm run package:desktop
       - name: Verify independent desktop executable
@@ -97,6 +100,8 @@ jobs:
             output/browser-integration/*.png
             output/consumer-scene/report.json
             output/consumer-scene/*.png
+            output/detail-browser/*.json
+            output/detail-browser/*.png
             output/desktop*/result.json
             output/desktop*/failure.json
             output/desktop*/failure.png
