@@ -163,6 +163,26 @@ try {
     assert.deepEqual(await state(), before); sameProject(await project(), beforeProject);
     saved = await project();
   });
+  await check('native decimal number controls use physical increments without spinner rounding or changing saved observations', async () => {
+    const before = await project(), fractional = structuredClone(before);
+    fractional.config = { ...fractional.config, objectDistanceMm: 450.125, screenDistanceMm: 425.125, apertureDiameterMm: 9.375 };
+    await page.evaluate(value => window.lensLab.loadProject(JSON.stringify(value)), fractional);
+    const aperture = page.locator('#aperture'); await aperture.scrollIntoViewIfNeeded(); const box = await aperture.boundingBox();
+    for (const fraction of [.25, .75]) await page.mouse.click(box.x + box.width - 7, box.y + box.height * fraction);
+    sameProject(await project(), fractional);
+    await aperture.press('ArrowUp'); assert.ok(Math.abs((await state()).config.apertureDiameterMm - 9.475) < 1e-12);
+    await aperture.press('Shift+ArrowDown'); assert.ok(Math.abs((await state()).config.apertureDiameterMm - 9.465) < 1e-12);
+    await aperture.press('PageDown'); assert.ok(Math.abs((await state()).config.apertureDiameterMm - 8.465) < 1e-12);
+    await aperture.fill('7.125'); await aperture.press('Shift+PageUp'); await aperture.press('Tab');
+    const adjusted = await project(); assert.ok(Math.abs(adjusted.config.apertureDiameterMm - 7.225) < 1e-12);
+    assert.deepEqual(adjusted.comparison, fractional.comparison); assert.deepEqual(adjusted.observation, fractional.observation);
+    await page.locator('#screen-distance').press('ArrowUp');
+    assert.equal((await state()).config.screenDistanceMm, 426.125);
+    const precisionFile = path.join(evidence, '소수 입력 보존.lens.json');
+    await saveDialog(precisionFile); await freshToast(() => page.locator('#save-project').click(), '저장했습니다');
+    sameProject(JSON.parse(await fs.readFile(precisionFile, 'utf8')), await project());
+    await page.evaluate(value => window.lensLab.loadProject(JSON.stringify(value)), before); sameProject(await project(), before);
+  });
   await check('native detail values preserve fractional optics and distinguish screen centers from virtual-image magnification', async () => {
     const before = await project();
     const imported = structuredClone(before);

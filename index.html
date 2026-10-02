@@ -36,7 +36,7 @@
   </aside>
   <section class="inspector panel"><div class="part-selection"><label for="part-select">구조 살펴보기</label><select id="part-select"></select><button id="focus-part">선택 부품 가까이</button></div><div class="part-copy"><span id="part-material" class="tag"></span><h3 id="part-name"></h3><p id="part-description"></p><p id="detail-reference" class="detail-reference"></p><dl id="part-detail-facts" class="detail-facts"></dl><p id="part-detail-note" class="detail-note"></p></div></section>
 </main>
-<footer><span id="save-status">이 기기에 실험 상태 자동 저장</span><span>얇은 렌즈 · 근축 기하광학 · 1.1.0</span></footer>
+<footer><span id="save-status">이 기기에 실험 상태 자동 저장</span><span>얇은 렌즈 · 근축 기하광학 · 1.1.1</span></footer>
 <details class="model-note"><summary>이 실험의 계산 범위</summary><p>단색광, 수렴 얇은 렌즈 한 장과 작은 각도의 광선으로 상을 계산합니다. 광학 유리의 실제 두께·투과 손실·회절·색수차·구면수차는 계산하지 않습니다. 렌즈의 곡면은 구조 표현이며 굴절 계산은 중심의 모델 평면에서 수행합니다.</p><p>조리개를 줄이면 이 기하광학 모형의 흐림과 포집 광량이 함께 줄어듭니다. 실제 장비에서는 회절 등이 영향을 주므로 구멍이 작을수록 항상 더 좋은 상을 얻는다는 뜻은 아닙니다. 초점이 레일 밖에 있거나 무한대에 있으면 유한한 스크린 초점을 만들어 표시하지 않습니다.</p></details>
 <dialog id="help-dialog"><div class="section-heading"><h2>Lens Lab 사용 안내</h2><button id="close-help">닫기</button></div><p>왼쪽 실험을 고르거나 물체·스크린 거리와 조리개를 조절하세요. 광학 상태는 조절 즉시 바뀝니다. 재생 버튼 없이 스크린의 변화를 관찰합니다.</p><p>3D 화면을 끌어 회전하고 휠로 확대합니다. 물체와 스크린의 캐리지는 레일을 따라 움직일 수 있습니다. 전체 보기는 시점만 복원합니다.</p><p>실상은 스크린에서 초점을 맞출 수 있고, 허상 위치는 광선의 역연장으로 확인합니다. 허상을 스크린의 선명한 영상으로 표시하지 않습니다. 점 흐림 반지름은 한 물체점에서 온 빛의 퍼진 크기입니다.</p><p>실험 파일은 조건·비교 기준·관찰 시점을 저장합니다. 안내 진행과 완료 증거는 현재 세션에만 유지됩니다. 원문 보호 안내가 나오면 원문과 현재 실험을 각각 파일로 보관하세요.</p></dialog>
 <div id="toast" role="status" hidden></div><script type="module" src="/src/main.js"></script>
