@@ -163,6 +163,48 @@ try {
     assert.deepEqual(await state(), before); sameProject(await project(), beforeProject);
     saved = await project();
   });
+  await check('native detail values preserve fractional optics and distinguish screen centers from virtual-image magnification', async () => {
+    const before = await project();
+    const imported = structuredClone(before);
+    imported.config = { focalLengthMm: 150, objectDistanceMm: 100.0005, screenDistanceMm: 320.125, apertureDiameterMm: 7.25 };
+    await page.evaluate(value => window.lensLab.loadProject(JSON.stringify(value)), imported);
+    const current = await state(), expected = solveOptics(imported.config);
+    assert.equal(current.detail.image.kind, 'virtual');
+    assert.ok(current.detail.image.magnification > 0 && current.detail.screen.centerScale < 0);
+    assert.equal(current.detail.focusTolerance.railRangeMm, null);
+    assert.deepEqual(current.solution, expected);
+    const shown = await page.evaluate(() => ({
+      center: Number(document.querySelector('#detail-center-scale').dataset.value),
+      image: Number(document.querySelector('#detail-image-scale').dataset.value),
+      empty: document.querySelector('#focus-tolerance-range').dataset.empty,
+      values: [...document.querySelectorAll('[data-range]')].map(node => [node.dataset.range, Number(node.value)]),
+    }));
+    assert.equal(shown.center, expected.screen.objectScale); assert.equal(shown.image, expected.image.magnification);
+    assert.equal(shown.empty, 'true');
+    for (const [key, value] of shown.values) assert.equal(value, imported.config[key]);
+    sameProject(await project(), imported);
+    await page.evaluate(value => window.lensLab.loadProject(JSON.stringify(value)), before);
+    sameProject(await project(), before);
+  });
+  await check('focused native component facts and close camera survive an actual native save and reload', async () => {
+    const before = await project();
+    await menu('보기', '3D 크게 보기');
+    await page.locator('#focus-part-select').selectOption('iris');
+    const selected = await project();
+    assert.deepEqual(selected.config, before.config); assert.deepEqual(selected.comparison, before.comparison);
+    assert.deepEqual(selected.observation.camera, before.observation.camera);
+    assert.equal(await page.locator('#focus-detail-facts .detail-fact').count(), 6);
+    await page.locator('#focus-part-inline').click();
+    const close = await project(); assert.notDeepEqual(close.observation.camera, before.observation.camera);
+    const detailFile = path.join(evidence, '렌즈 상세 관찰.json');
+    await saveDialog(detailFile); await freshToast(() => page.locator('#save-project').click(), '저장했습니다');
+    sameProject(JSON.parse(await fs.readFile(detailFile, 'utf8')), close);
+    await menu('보기', '3D 크게 보기');
+    await openDialog(detailFile); await freshToast(() => page.locator('#open-project').click(), '복원했습니다');
+    sameProject(await project(), close);
+    await page.evaluate(value => window.lensLab.loadProject(JSON.stringify(value)), before);
+    sameProject(await project(), before);
+  });
   await check('native save replaces only a complete file; BOM import retains every state field and original bytes', async () => {
     await fs.writeFile(projectPath, 'previous destination remains until complete replacement');
     await page.evaluate(() => { document.querySelector('#toast').hidden = true; document.querySelector('#toast').textContent = ''; });
