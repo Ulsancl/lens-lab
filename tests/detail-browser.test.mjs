@@ -9,6 +9,7 @@ import { createProject } from '../src/project.js';
 
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'output', 'detail-browser');
 const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version, address = 'http://127.0.0.1:5255';
+const hardware = process.env.LENS_BROWSER_HARDWARE === '1';
 const checks = [], errors = [], externalRequests = [], evidence = [];
 let server, browser, context, page;
 const near = (actual, expected, tolerance = 1e-9) => assert.ok(Number.isFinite(actual) && Number.isFinite(expected) && Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -79,7 +80,7 @@ function opticalClosure(current) {
 try {
   await mkdir(output, { recursive: true }); await rm(path.join(output, 'failure.png'), { force: true });
   server = await createServer({ root, server: { host: '127.0.0.1', port: 5255, strictPort: true, hmr: false, watch: null } }); await server.listen();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(hardware ? { args: ['--enable-gpu', '--use-angle=d3d11', '--ignore-gpu-blocklist'] } : {}) });
   context = await browser.newContext({ viewport: { width: 1600, height: 1100 }, deviceScaleFactor: 1, acceptDownloads: true }); await instrument(context);
   page = await context.newPage(); page.setDefaultTimeout(30000); watch(page);
   await page.goto(address, { waitUntil: 'commit', timeout: 60000 }); await ready(); evidence.push({ initialRendering: await rendering() });
@@ -159,6 +160,72 @@ try {
       await page.evaluate(submit => { const range = document.querySelector('[data-range="screenDistanceMm"]'), number = document.querySelector('#screen-distance'); range.value = '320'; range.dispatchEvent(new Event('input', { bubbles: true })); number.value = '500.125'; if (submit) document.querySelector('#settings-form').requestSubmit(); else number.dispatchEvent(new Event('change', { bubbles: true })); }, submit);
       await paint(); near((await state()).config.screenDistanceMm, 500.125); near((await state()).detail.screen.distanceMm, 500.125); opticalClosure(await state());
     }
+  });
+
+  await check('Native number input pointers and keys preserve fractional millimetres, comparison and camera', async () => {
+    await load(fresh({ objectDistanceMm: 300.125, screenDistanceMm: 320.125, apertureDiameterMm: 7.25 }));
+    await page.locator('#pin-comparison').click(); await select('iris'); await page.locator('#focus-part').click();
+    const before = await project();
+    for (const [id, key, sequence] of [
+      ['object-distance', 'objectDistanceMm', [['ArrowUp', 301.125], ['Shift+ArrowDown', 301.025], ['PageUp', 311.025], ['Shift+PageDown', 310.025]]],
+      ['screen-distance', 'screenDistanceMm', [['ArrowDown', 319.125], ['Shift+ArrowUp', 319.225], ['PageDown', 309.225], ['Shift+PageUp', 310.225]]],
+      ['aperture', 'apertureDiameterMm', [['ArrowUp', 7.35], ['Shift+ArrowDown', 7.34], ['PageUp', 8.34], ['Shift+PageDown', 8.24]]],
+    ]) {
+      await load(before); const input = page.locator(`#${id}`);
+      assert.equal(await input.evaluate(node => getComputedStyle(node).appearance), 'textfield');
+      await input.scrollIntoViewIfNeeded(); const box = await input.boundingBox();
+      // The former upper/lower native spin-button hit areas must now only focus text.
+      await page.mouse.move(box.x + box.width - 7, box.y + box.height / 4);
+      for (const fraction of [.25, .75]) { await page.mouse.click(box.x + box.width - 7, box.y + box.height * fraction); await paint(); assert.deepEqual(await project(), before); }
+      for (const [pressed, expected] of sequence) {
+        await input.press(pressed); await paint(); near((await state()).config[key], expected); near(Number(await input.inputValue()), expected); opticalClosure(await state());
+      }
+      const stepped = await project(); await input.press('Tab'); assert.deepEqual(await project(), stepped);
+      assert.deepEqual(stepped.comparison, before.comparison); assert.deepEqual(stepped.observation, before.observation);
+    }
+    await load(before); const screen = page.locator('#screen-distance');
+    await screen.focus();
+    for (const key of ['Home', 'ArrowRight', 'ArrowRight', 'ArrowLeft']) await page.keyboard.press(key);
+    await page.keyboard.insertText('1'); assert.equal(await screen.inputValue(), '3120.125'); assert.deepEqual(await project(), before);
+    await screen.fill('320.125'); await screen.press('End'); await screen.press('ArrowLeft'); await screen.press('Backspace');
+    assert.equal(await screen.inputValue(), '320.15'); assert.deepEqual(await project(), before);
+    await screen.press('Tab'); near((await state()).config.screenDistanceMm, 320.15);
+    await load(before); const aperture = page.locator('#aperture'); await aperture.fill('7.375');
+    await aperture.press('ArrowUp'); near((await state()).config.apertureDiameterMm, 7.475);
+    await aperture.press('Tab'); near((await state()).config.apertureDiameterMm, 7.475);
+    for (const [text, key, expected] of [['17.995', 'ArrowUp', 18], ['19', 'ArrowDown', 18], ['6.005', 'ArrowDown', 6], ['5', 'ArrowUp', 6]]) {
+      await aperture.fill(text); await aperture.press(key); near((await state()).config.apertureDiameterMm, expected); near(Number(await aperture.inputValue()), expected);
+    }
+    const applied = await project(); await aperture.fill(''); await aperture.press('ArrowUp'); assert.equal(await aperture.inputValue(), ''); assert.deepEqual(await project(), applied);
+    await load(before);
+  });
+
+  await check('A queued range move and an uncommitted number edit each supply the correct next keyboard base', async () => {
+    const initial = fresh({ objectDistanceMm: 300.125, screenDistanceMm: 320.125, apertureDiameterMm: 7.25 });
+    await load(initial); await page.locator('#pin-comparison').click(); const before = await project();
+    for (const typed of [null, '7.375']) {
+      await load(before);
+      // One browser task keeps the real input event ahead of the pending animation frame.
+      const immediate = await page.evaluate(typed => {
+        const range = document.querySelector('[data-range="apertureDiameterMm"]'), input = document.querySelector('#aperture');
+        range.value = '8.125'; range.dispatchEvent(new Event('input', { bubbles: true }));
+        if (typed !== null) { input.value = typed; input.dispatchEvent(new Event('input', { bubbles: true })); }
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+        return window.lensLab.getState();
+      }, typed);
+      const expected = typed === null ? 8.225 : 7.475; near(immediate.config.apertureDiameterMm, expected);
+      await paint(); near((await state()).config.apertureDiameterMm, expected); near(Number(await page.locator('#aperture').inputValue()), expected);
+      assert.deepEqual((await project()).comparison, before.comparison); assert.deepEqual((await project()).observation, before.observation);
+    }
+    await load(before);
+    const unhandled = await page.locator('#aperture').evaluate(input => {
+      const results = [];
+      for (const options of [{ key: 'ArrowUp', altKey: true }, { key: 'ArrowDown', ctrlKey: true }, { key: 'PageUp', metaKey: true }, ...['ArrowLeft', 'ArrowRight', 'Home', 'End'].map(key => ({ key }))]) {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...options }); input.dispatchEvent(event); results.push(event.defaultPrevented);
+      }
+      return results;
+    });
+    assert.deepEqual(unhandled, Array(7).fill(false)); assert.deepEqual(await project(), before);
   });
 
   await check('Lens, pupil and screen facts use the actual optical units and keep infinite-image quantities explicit', async () => {
@@ -272,6 +339,6 @@ try {
   assert.deepEqual(errors, []); assert.deepEqual(externalRequests, []);
 } finally {
   await mkdir(output, { recursive: true });
-  await writeFile(path.join(output, 'detail-browser-results.json'), JSON.stringify({ version, renderer: 'Headless Chromium default backend; actual renderer recorded in evidence. Static optical model with live browser clock.', checks, evidence, errors, externalRequests }, null, 2));
+  await writeFile(path.join(output, 'detail-browser-results.json'), JSON.stringify({ version, renderer: `Headless Chromium ${hardware ? 'D3D11 hardware' : 'default'} backend; actual renderer recorded in evidence. Static optical model with live browser clock.`, checks, evidence, errors, externalRequests }, null, 2));
   await context?.close(); await browser?.close(); await server?.close();
 }

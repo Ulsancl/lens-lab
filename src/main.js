@@ -78,6 +78,18 @@ try{scene=new LensScene($('#scene'),{onConfigChange:queueDrag,onSelect:id=>{view
 syncControls();refresh();if(!initialCamera)scene?.resetCamera();
 $('#settings-form').addEventListener('submit',event=>{event.preventDefault();if(busy||!event.currentTarget.reportValidity())return;const patch=Object.fromEntries($$('[data-number]').map(input=>[input.dataset.number,Number(input.value)]));flushDrag();changeConfig(patch);});
 $$('[data-number]').forEach(input=>input.addEventListener('change',()=>{if(input.reportValidity()){const patch={[input.dataset.number]:Number(input.value)};flushDrag();changeConfig(patch);}}));
+$$('input[data-number]').forEach(input=>input.addEventListener('keydown',event=>{
+  const directions={ArrowDown:-1,ArrowUp:1,PageDown:-10,PageUp:10};
+  if(!(event.key in directions)||event.altKey||event.ctrlKey||event.metaKey)return;
+  event.preventDefault();
+  if(busy||!Number.isFinite(input.valueAsNumber))return;
+  const key=input.dataset.number,typed=input.valueAsNumber;
+  // An uncommitted text edit wins; otherwise include the latest queued carriage value.
+  const current=typed!==config[key]?typed:(pendingDrag?.[key]??typed);
+  const increment=(key==='apertureDiameterMm'?.1:1)*(event.shiftKey?.1:1);
+  const value=Math.min(Number(input.max),Math.max(Number(input.min),current+directions[event.key]*increment));
+  flushDrag();input.value=String(value);changeConfig({[key]:value});
+}));
 $$('[data-range]').forEach(input=>input.addEventListener('input',()=>queueDrag({[input.dataset.range]:Number(input.value)})));
 $$('[data-range]').forEach(input=>input.addEventListener('keydown',event=>{const directions={ArrowLeft:-1,ArrowDown:-1,ArrowRight:1,ArrowUp:1,PageDown:-10,PageUp:10};if(!(event.key in directions)&&event.key!=='Home'&&event.key!=='End')return;event.preventDefault();const key=input.dataset.range,increment=(key==='apertureDiameterMm'?.1:1)*(event.shiftKey?.1:1),current=pendingDrag?.[key]??config[key];const value=event.key==='Home'?Number(input.min):event.key==='End'?Number(input.max):Math.min(Number(input.max),Math.max(Number(input.min),current+directions[event.key]*increment));queueDrag({[key]:value});}));
 $$('[data-view]').forEach(input=>input.addEventListener('change',()=>{view[input.dataset.view]=input.checked;refresh();scheduleSave();}));
