@@ -1,3 +1,4 @@
+import { artifactDirectory } from '../scripts/safe-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { createServer } from 'vite';
 import { makeProjection, makeTarget } from '../src/projection.js';
 
 const root = path.resolve(import.meta.dirname, '..');
-const output = path.join(root, 'output/consumer-scene');
+const output = artifactDirectory(root, path.join(root, 'output/consumer-scene'));
 const hardware = process.env.LENS_BROWSER_HARDWARE === '1';
 const checks = [], errors = [], evidence = [];
 let server, browser, page, gpu, failure;

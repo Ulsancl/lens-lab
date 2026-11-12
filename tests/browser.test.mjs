@@ -1,3 +1,4 @@
+import { artifactDirectory } from '../scripts/safe-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { DEFAULT_CONFIG, solveOptics, traceRay } from '../src/physics.js';
 import { makeProjection, makeTarget } from '../src/projection.js';
 import { createProject, serializeProject } from '../src/project.js';
 
-const root=path.resolve(import.meta.dirname,'..'),output=path.join(root,'output/browser-integration');
+const root=path.resolve(import.meta.dirname,'..'),output=artifactDirectory(root, path.join(root,'output/browser-integration'));
 await fs.mkdir(output,{recursive:true});
 const server=await createServer({root,server:{host:'127.0.0.1',port:5221,strictPort:true,hmr:false}});await server.listen();
 const hardware=process.env.LENS_BROWSER_HARDWARE==='1';
