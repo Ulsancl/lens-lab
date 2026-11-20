@@ -100,11 +100,55 @@ try{
     await page.reload();await page.waitForFunction(()=>window.lensLab?.sceneDebug()?.ready);assert.deepEqual((await project()).config,saved.config);assert.equal(await guide(),null);
     for(const raw of['{bad JSON',JSON.stringify({...saved,schemaVersion:99})]){const before=await project(),error=await page.evaluate(raw=>{try{window.lensLab.loadProject(raw);return'';}catch(error){return error.message;}},raw);assert.match(error,/원본/);assert.deepEqual(await project(),before);}
   });
+  await check('opposite carriage moves in one frame leave the screen at its final position', async () => {
+    await load(createProject({config:DEFAULT_CONFIG})); await page.locator('[data-camera="iso"]').click(); await paint();
+    const canvas = page.locator('#scene canvas'); await canvas.scrollIntoViewIfNeeded();
+    const handle = (await debug()).dragHandles.find(item => item.kind === 'screen'), rect = await canvas.boundingBox();
+    await page.evaluate(() => window.addEventListener('pointerdown', event => {
+      document.querySelector('#scene canvas').dataset.dragOrigin = JSON.stringify([event.pointerId, event.clientX, event.clientY]);
+    }, { capture: true, once: true }));
+    await page.mouse.move(rect.x + handle.x, rect.y + handle.y); await page.mouse.down();
+    try {
+      assert.equal((await debug()).dragging, 'screen');
+      await canvas.evaluate(el => {
+        const [pointerId, x, y] = JSON.parse(el.dataset.dragOrigin);
+        for (const offset of [36, 0]) el.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId, pointerType: 'mouse', buttons: 1, bubbles: true, clientX: x + offset, clientY: y,
+        }));
+      });
+      await paint();
+      assert.equal((await current()).config.screenDistanceMm, DEFAULT_CONFIG.screenDistanceMm);
+    } finally { await page.mouse.up(); }
+  });
   await check('real carriage drags and cancellation preserve camera and restore orbit controls',async()=>{
     await load(createProject({config:DEFAULT_CONFIG}));await page.locator('[data-camera="iso"]').click();await paint();const camera=(await debug()).camera;
     for(const kind of['target','screen']){await page.locator('#scene').scrollIntoViewIfNeeded();const rect=await page.locator('#scene').boundingBox(),handle=(await debug()).dragHandles.find(item=>item.kind===kind),before=(await current()).config;
       await page.mouse.move(rect.x+handle.x,rect.y+handle.y);await page.mouse.down();assert.equal((await debug()).dragging,kind);assert.equal((await debug()).orbitEnabled,false);await page.mouse.move(rect.x+handle.x+32,rect.y+handle.y,{steps:5});await paint();await page.mouse.up();await paint();assert.notEqual((await current()).config[kind==='target'?'objectDistanceMm':'screenDistanceMm'],before[kind==='target'?'objectDistanceMm':'screenDistanceMm']);assert.equal((await debug()).orbitEnabled,true);assert.equal((await debug()).dragging,null);assert.deepEqual((await debug()).camera,camera);await sceneParity();}
     const rect=await page.locator('#scene').boundingBox(),handle=(await debug()).dragHandles[0];await page.mouse.move(rect.x+handle.x,rect.y+handle.y);await page.mouse.down();assert.equal((await debug()).dragging,'target');await page.locator('#scene canvas').dispatchEvent('pointercancel',{pointerId:1,pointerType:'mouse',isPrimary:true,bubbles:true});await page.mouse.up();assert.equal((await debug()).orbitEnabled,true);assert.equal((await debug()).dragging,null);
+  });
+  await check('without WebGL, open and undo preserve the file camera but a new experiment clears it', async () => {
+    const fallback = await browser.newPage();
+    try {
+      await fallback.addInitScript(() => {
+        const getContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+          return /webgl/i.test(type) ? null : getContext.call(this, type, ...args);
+        };
+      });
+      await fallback.goto(page.url());
+      await fallback.waitForFunction(() => !!window.lensLab && !document.querySelector('#scene-error').hidden);
+      const camera = { position: [1, .25, .5], target: [0, 0, 0], zoom: 1.5 };
+      const result = await fallback.evaluate(camera => {
+        const api = window.lensLab, project = api.project();
+        project.observation.camera = camera;
+        const imported = api.loadProject(JSON.stringify(project)).observation.camera;
+        document.querySelector('#new-project').click();
+        const fresh = api.project().observation.camera;
+        document.querySelector('#undo-new').click();
+        return [imported, fresh, api.project().observation.camera];
+      }, camera);
+      assert.deepEqual(result, [camera, null, camera]);
+    } finally { await fallback.close(); }
   });
   await check('automatic saves without a camera fit their restored physical distances',async()=>{
     const isolated=await browser.newContext({viewport:{width:1600,height:1100}}),other=await isolated.newPage();watch(other);const saved=createProject({config:{...DEFAULT_CONFIG,objectDistanceMm:900,screenDistanceMm:900}});

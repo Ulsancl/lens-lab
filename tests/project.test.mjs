@@ -1,3 +1,4 @@
+import { archiveOriginal } from '../src/recovery.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW, ProjectError } from '../src/project.js';
@@ -125,4 +126,22 @@ test('one UTF-8 BOM is accepted, malformed and oversized originals are rejected 
   assert.throws(() => parseProject(' '.repeat(10 * 1024 * 1024 + 1)), e => e.code === 'PROJECT_TOO_LARGE');
   // UTF-8 byte size, not only JavaScript character count, enforces the limit.
   assert.throws(() => parseProject('가'.repeat(4 * 1024 * 1024)), e => e.code === 'PROJECT_TOO_LARGE');
+});
+
+test('recovery reuses exact legacy backups and never overwrites a different original', t => {
+  t.mock.method(Date, 'now', () => 1000);
+  const records = new Map([['experiment', 'protected primary'], ['experiment-original-1000', 'older original']]);
+  const storage = {
+    get length() { return records.size; },
+    key: index => [...records.keys()][index],
+    getItem: key => records.get(key) ?? null,
+    setItem: (key, raw) => records.set(key, raw),
+  };
+  archiveOriginal(storage, 'experiment', 'older original');
+  archiveOriginal(storage, 'experiment', '\ufeffnew original');
+  archiveOriginal(storage, 'experiment', '\ufeffnew original');
+  assert.deepEqual([...records], [
+    ['experiment', 'protected primary'], ['experiment-original-1000', 'older original'],
+    ['experiment-original-1001', '\ufeffnew original'],
+  ]);
 });

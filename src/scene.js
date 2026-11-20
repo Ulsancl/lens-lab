@@ -278,7 +278,9 @@ export class LensScene {
     if (Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) < 3 && !this.drag.moved) return;
     this.drag.moved = true; const x = this.drag.initial + point.x - this.drag.startX;
     const key = this.drag.kind === 'target' ? 'objectDistanceMm' : 'screenDistanceMm', distance = clamp(Math.round(x * 10000 * (this.drag.kind === 'target' ? -1 : 1)) / 10, 100, 900);
-    if (this.solution.config[key] !== distance) this.onConfigChange({ [key]: distance }); event.preventDefault(); event.stopImmediatePropagation();
+    // An earlier move may still be queued for this frame. Returning to the
+    // displayed distance must replace it, not leave the stale value pending.
+    this.onConfigChange({ [key]: distance }); event.preventDefault(); event.stopImmediatePropagation();
   }
   endPointer(event, canceled = false) {
     if (this.drag) {
