@@ -109,6 +109,24 @@ function browserDownload(contents,name,mime='application/json;charset=utf-8'){co
 async function saveFile(){if(busy)return;flushDrag();setBusy(true);try{const contents=serializeProject(capture()),name=`lens-lab-${new Date().toISOString().slice(0,10)}.json`;if(desktop){const result=await desktop.saveProject({contents,name});if(result.canceled){toast('저장을 취소했습니다. 현재 실험은 유지합니다.');return;}}else browserDownload(contents,name);saveLocal();toast('실험 조건·비교 기준·관찰 시점을 저장했습니다.');}catch(error){toast(`저장하지 못했습니다. ${error.message}`);}finally{setBusy(false);}}
 async function openFile(){if(busy)return;flushDrag();if(!desktop){$('#project-file').click();return;}setBusy(true);try{const result=await desktop.openProject();if(result.canceled){toast('열기를 취소했습니다. 현재 실험은 유지합니다.');return;}const saved=parseProject(result.content);remember();readProject(saved);toast('저장한 광학 실험을 복원했습니다.');}catch(error){toast(`열지 못했습니다. ${error.message}`);}finally{setBusy(false);}}
 function toggleFocus(){focused=!focused;document.body.classList.toggle('focus-mode',focused);text('#focus',focused?'실험 화면으로':'3D 크게 보기');returnToScene();}
+function showHelp(){const dialog=$('#help-dialog');if(!dialog.open)dialog.showModal();}
+
+const narrowLayout = window.matchMedia('(max-width: 700px)');
+let layout = narrowLayout.matches ? 'narrow' : 'wide';
+const disclosures = $$('[data-narrow-disclosure]').map(element => {
+  const openIn = { wide: element.open, narrow: false };
+  element.open = openIn[layout];
+  return { element, openIn };
+});
+window.addEventListener('resize', () => {
+  const nextLayout = narrowLayout.matches ? 'narrow' : 'wide';
+  if (nextLayout === layout) return;
+  for (const { element, openIn } of disclosures) {
+    openIn[layout] = element.open;
+    element.open = openIn[nextLayout] || element.contains(document.activeElement);
+  }
+  layout = nextLayout;
+});
 
 $('#part-select').replaceChildren(...COMPONENTS.map(part=>Object.assign(document.createElement('option'),{value:part.id,textContent:part.name})));
 $('#focus-part-select').replaceChildren(...COMPONENTS.map(part=>Object.assign(document.createElement('option'),{value:part.id,textContent:part.name})));
@@ -139,8 +157,8 @@ $('#pin-comparison').addEventListener('click',pinComparison);$('#clear-compariso
 $('#show-current').addEventListener('click',()=>{projectionMode='current';renderProjectionMode();});$('#show-saved').addEventListener('click',()=>{if(comparison){projectionMode='saved';renderProjectionMode();}});$('#show-observation').addEventListener('click',()=>{$('.observation').scrollIntoView({block:'start'});});
 $('#undo-new').addEventListener('click',()=>{if(!previous||busy)return;const saved=previous;previous=null;readProject(saved.project,saved.guide);$('#undo-new').hidden=true;toast('직전 실험과 안내를 복원했습니다.');});
 $('#save-project').addEventListener('click',saveFile);$('#open-project').addEventListener('click',openFile);$('#project-file').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file||busy)return;flushDrag();setBusy(true);try{if(file.size>10*1024*1024)throw new Error('실험 파일은 10 MiB 이하여야 합니다.');const saved=parseProject(await file.text());remember();readProject(saved);toast('저장한 광학 실험을 복원했습니다.');}catch(error){toast(`열지 못했습니다. ${error.message}`);}finally{event.target.value='';setBusy(false);}});
-$('#recover-original').addEventListener('click',()=>{if(recoveredRaw!==null)browserDownload(recoveredRaw,'lens-lab-original.txt','text/plain;charset=utf-8');});$('#close-help').addEventListener('click',()=>$('#help-dialog').close());
-desktop?.onCommand(command=>{if(busy)return;if(command==='new-project')newExperiment();else if(command==='open-project')openFile();else if(command==='save-project')saveFile();else if(command==='toggle-rays'){view.rays=!view.rays;syncControls();refresh();scheduleSave();}else if(command==='focus')toggleFocus();else if(command==='help')$('#help-dialog').showModal();});
+$('#recover-original').addEventListener('click',()=>{if(recoveredRaw!==null)browserDownload(recoveredRaw,'lens-lab-original.txt','text/plain;charset=utf-8');});$('#show-help').addEventListener('click',showHelp);$('#close-help').addEventListener('click',()=>$('#help-dialog').close());
+desktop?.onCommand(command=>{if(busy)return;if(command==='new-project')newExperiment();else if(command==='open-project')openFile();else if(command==='save-project')saveFile();else if(command==='toggle-rays'){view.rays=!view.rays;syncControls();refresh();scheduleSave();}else if(command==='focus')toggleFocus();else if(command==='help')showHelp();});
 window.addEventListener('beforeunload',()=>{flushDrag();saveLocal();});document.addEventListener('visibilitychange',()=>{if(document.hidden){flushDrag();saveLocal();}});
 window.lensLab={getState:()=>structuredClone({config,solution,view,comparison,detail:lensDetail(config,solution),focused}),project:()=>structuredClone(capture()),loadProject:raw=>{const saved=parseProject(raw);readProject(saved);return structuredClone(capture());},sceneDebug:()=>scene?.getDebug()??null,guide:()=>structuredClone(guide),components:()=>COMPONENTS.map(part=>({...part}))};
 window.render_game_to_text=()=>JSON.stringify({...window.lensLab.getState(),coordinates:'Optical lengths in mm, 3D in m; lens x=0, optical axis +X, target -X, screen +X, vertical +Y.'});
