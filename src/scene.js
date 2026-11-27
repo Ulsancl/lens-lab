@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { traceRay } from './physics.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { targetGeometry, traceRay } from './physics.js';
 import { COMPONENTS, DEFAULT_VIEW, GEOMETRY as G, carriagePositions, opticalPointToWorld, rasterPlane } from './geometry.js';
 import { MECHANICAL as M, rulerTickPixel, rulerWorldToUv, glassGeometry, seatGeometry, finishedRingGeometry, knurledRingGeometry, apertureControlAngle, screenBackingGeometry, rayDisplayClipPlanes } from './mechanical-geometry.js';
+import { finishTexture, coatedGlassMaterial, irisPetalGeometry, shapeIrisPetals } from './apparatus-visuals.js';
 import './scene.css';
 
 const V = p => new THREE.Vector3(...p), clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -26,7 +28,8 @@ export class LensScene {
   constructor(container, { onConfigChange = () => {}, onSelect = () => {}, onCameraChange = () => {} } = {}) {
     this.container = container; this.onConfigChange = onConfigChange; this.onSelect = onSelect; this.onCameraChange = onCameraChange;
     this.view = structuredClone(DEFAULT_VIEW); this.components = new Map(); this.geometries = new Set(); this.materials = new Set(); this.textures = new Set(); this.pointers = []; this.carriageRoofs = []; this.updating = true;
-    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#172832');
+    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#181f26');
+    this.scene.fog = new THREE.Fog(this.scene.background, 1.8, 8);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.7)); this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.0;
@@ -41,16 +44,16 @@ export class LensScene {
     this.controlsChanged = () => { if (!this.updating && !this.disposed) { this.render(); this.onCameraChange(this.getCameraState()); } };
     this.controls.addEventListener('change', this.controlsChanged);
     const room = new RoomEnvironment(), pmrem = new THREE.PMREMGenerator(this.renderer); this.environment = pmrem.fromScene(room, .04);
-    this.scene.environment = this.environment.texture; this.scene.environmentIntensity = .65; room.dispose(); pmrem.dispose();
-    this.scene.add(new THREE.HemisphereLight(0xc5e7ff, 0x18292e, 1.35));
-    const key = new THREE.DirectionalLight(0xffedd3, 3); key.position.set(-.45, 1.7, .7); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -1.2, right: 1.2, top: .45, bottom: -.45, near: .05, far: 4 }); key.shadow.normalBias = .0008; this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x7abaca, 2); rim.position.set(.8, .8, -1); this.scene.add(rim);
+    this.scene.environment = this.environment.texture; this.scene.environmentIntensity = .82; room.dispose(); pmrem.dispose();
+    this.scene.add(new THREE.HemisphereLight(0xe3ecff, 0x252022, 1.02));
+    const key = new THREE.DirectionalLight(0xffefde, 3.0); key.position.set(-.45, 1.7, .7); key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -1.2, right: 1.2, top: .45, bottom: -.45, near: .05, far: 4 }); key.shadow.normalBias = .00045; this.scene.add(key);
+    const rim = new THREE.DirectionalLight(0xb6d5ef, 1.6); rim.position.set(.8, .8, -1); this.scene.add(rim);
     this.root = new THREE.Group(); this.scene.add(this.root); this.makeMaterials(); this.buildBench(); this.buildCarriages(); this.buildLens(); this.buildOverlay();
     this.rays = new THREE.Group(); this.root.add(this.rays); this.focusMarker = new THREE.Group(); this.root.add(this.focusMarker);
     this.modelPlane = this.mesh(imageGeometry(.046, .058, -1), this.material({ color: '#80e7dd', transparent: true, opacity: .13, depthWrite: false, side: THREE.DoubleSide }), this.root, [0, G.axisY, 0]); this.modelPlane.userData.nonPickable = true;
     const pupilPoints = Array.from({ length: 129 }, (_, i) => new THREE.Vector3(0, Math.cos(i * TAU / 128), Math.sin(i * TAU / 128)));
-    const pupilGeometry = new THREE.BufferGeometry().setFromPoints(pupilPoints), pupilMaterial = new THREE.LineBasicMaterial({ color: '#69ffe8', depthTest: false, toneMapped: false });
+    const pupilGeometry = new THREE.BufferGeometry().setFromPoints(pupilPoints), pupilMaterial = new THREE.LineBasicMaterial({ color: '#69ffe8', depthTest: false, toneMapped: false, fog: false });
     this.geometries.add(pupilGeometry); this.materials.add(pupilMaterial); this.pupilGlyph = new THREE.Line(pupilGeometry, pupilMaterial);
     this.pupilGlyph.position.y = G.axisY; this.pupilGlyph.visible = false; this.pupilGlyph.userData.nonPickable = true; this.pupilGlyph.renderOrder = 5; this.root.add(this.pupilGlyph);
     this.root.traverse(object => { if (!object.isMesh) return; let ancestor = object; while (ancestor && !ancestor.userData.partId) ancestor = ancestor.parent; if (ancestor) object.userData.partId = ancestor.userData.partId; });
@@ -60,30 +63,36 @@ export class LensScene {
     this.resizeObserver = new ResizeObserver(() => this.resize()); this.resizeObserver.observe(container);
     this.targetRoot.position.x = -.3; this.screenRoot.position.x = .36; this.resize(); this.updating = false; this.resetCamera();
   }
-  material(values) { const material = new THREE.MeshStandardMaterial({ roughness: .4, metalness: .6, ...values }); this.materials.add(material); return material; }
+  material(values) { const material = new THREE.MeshStandardMaterial({ roughness: .4, metalness: .6, fog: false, ...values }); this.materials.add(material); return material; }
   makeMaterials() {
+    const brush = finishTexture(true), grain = finishTexture();
+    this.textures.add(brush); this.textures.add(grain);
+    const anodized = { metalness: .77, roughness: .47, roughnessMap: grain, bumpMap: grain, bumpScale: .00005 };
     this.mat = {
-      steel: this.material({ color: '#b8c8cf', roughness: .26, metalness: .92 }), dark: this.material({ color: '#263b48', roughness: .37, metalness: .8 }),
-      base: this.material({ color: '#314c5a', roughness: .5, metalness: .55 }), black: this.material({ color: '#151e26', roughness: .56, metalness: .2 }),
-      brass: this.material({ color: '#ccac68', roughness: .3, metalness: .85 }), rubber: this.material({ color: '#131b20', roughness: .85, metalness: 0 }),
-      white: this.material({ color: '#d0dcdd', roughness: .8, metalness: 0 }), cyan: this.material({ color: '#65cbd7', roughness: .3, metalness: .4 }),
+      steel: this.material({ color: '#aeb9bf', roughness: .32, metalness: .92, roughnessMap: brush, bumpMap: brush, bumpScale: .000004 }),
+      machined: this.material({ color: '#83909a', roughness: .36, metalness: .9, roughnessMap: brush }),
+      dark: this.material({ color: '#283139', ...anodized }), anodized: this.material({ color: '#161d23', ...anodized }),
+      base: this.material({ color: '#343d45', roughness: .7, metalness: .32, bumpMap: grain, bumpScale: .00017 }),
+      black: this.material({ color: '#12161a', roughness: .65, metalness: .3 }),
+      brass: this.material({ color: '#c4a06b', roughness: .34, metalness: .86, roughnessMap: brush }),
+      rubber: this.material({ color: '#15181a', roughness: .92, metalness: 0, bumpMap: grain, bumpScale: .00008 }),
+      white: this.material({ color: '#c3cac8', roughness: .83, metalness: 0 }),
+      screen: this.material({ color: '#4e4d46', metalness: 0, roughness: .91, bumpMap: grain, bumpScale: .00007, toneMapped: false, side: THREE.DoubleSide }),
+      reticle: this.material({ color: '#1d211e', metalness: .1, roughness: .48, toneMapped: false, side: THREE.DoubleSide }),
     };
-    const size = 256, data = new Uint8Array(size * size * 4);
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const value = Math.round(160 + 12 * Math.sin(TAU * 36 * y / size) + 3 * Math.sin(TAU * (7 * x + 13 * y) / size));
-      const i = (y * size + x) * 4; data[i] = data[i + 1] = data[i + 2] = value; data[i + 3] = 255;
-    }
-    const turned = new THREE.DataTexture(data, size, size); turned.wrapS = turned.wrapT = THREE.RepeatWrapping;
-    turned.generateMipmaps = true; turned.minFilter = THREE.LinearMipmapLinearFilter; turned.magFilter = THREE.LinearFilter; turned.needsUpdate = true; this.textures.add(turned);
-    this.mat.machined = this.material({ color: '#9fadb4', roughness: .4, metalness: .92, roughnessMap: turned, bumpMap: turned, bumpScale: .0000012 });
-    this.mat.anodized = this.material({ color: '#20313b', roughness: .43, metalness: .8, roughnessMap: turned });
+    this.mat.blades = ['#42494f', '#333b43', '#3b434a'].map(color => this.material({ color, roughness: .53, metalness: .66 }));
+    const worktop = grain.clone(); worktop.repeat.set(196, 196); worktop.needsUpdate = true; this.textures.add(worktop);
+    this.mat.worktop = this.material({ color: '#21272c', metalness: .06, roughness: .89, bumpMap: worktop, bumpScale: .00015, fog: true });
   }
   mesh(geometry, material, parent, position) {
-    this.geometries.add(geometry); const own = material.clone(); this.materials.add(own);
+    this.geometries.add(geometry);
+    const clone = original => { const own = original.clone(); this.materials.add(own); return own; };
+    const own = Array.isArray(material) ? material.map(clone) : clone(material);
     const mesh = new THREE.Mesh(geometry, own); mesh.castShadow = true; mesh.receiveShadow = true;
     if (position) mesh.position.set(...position); parent.add(mesh); return mesh;
   }
   box(size, material, parent, position) { return this.mesh(new THREE.BoxGeometry(...size), material, parent, position); }
+  machinedBox(size, radius, material, parent, position) { return this.mesh(new RoundedBoxGeometry(...size, 1, radius), material, parent, position); }
   cylinder(radius, length, material, parent, position, axis = 'y', segments = 40) {
     const mesh = this.mesh(new THREE.CylinderGeometry(radius, radius, length, segments), material, parent, position);
     if (axis === 'x') mesh.rotation.z = -Math.PI / 2; else if (axis === 'z') mesh.rotation.x = Math.PI / 2; return mesh;
@@ -101,36 +110,52 @@ export class LensScene {
   }
   buildBench() {
     const m = this.mat, base = this.part('bench-base', [0, .017, .088]);
-    this.box([1.96, .018, G.baseWidth], m.base, base, [0, .012, 0]);
-    this.baseTop = this.box([1.92, .0025, .180], m.dark, base, [0, .022, 0]);
-    for (const x of [-.85, .85]) for (const z of [-.065, .065]) { this.cylinder(.022, .009, m.rubber, base, [x, .001, z]); this.bolt(base, [x, .025, z]); }
-    this.textPlate('LENS LAB  /  OPTICAL BENCH', [.155, .024], base, [0, .013, .0951], [0, 0, 0]);
+    this.machinedBox([1.96, .018, G.baseWidth], .002, m.base, base, [0, .012, 0]);
+    this.baseTop = this.machinedBox([1.92, .0025, .180], .0006, m.dark, base, [0, .022, 0]);
+    for (const z of [-.093, .093]) this.machinedBox([1.93, .0022, .0016], .0005, m.machined, base, [0, .017, z]);
+    for (const x of [-.85, .85]) for (const z of [-.065, .065]) { this.cylinder(.022, .009, m.rubber, base, [x, .001, z]); this.bolt(base, [x, .0241, z]); }
+    this.textPlate('LENS LAB  /  광학 시험대', [.118, .012], base, [0, .0105, .0951], [0, 0, 0]);
     const rail = this.part('rail', [.055, G.railTopY, .018]);
-    this.railMain = this.box([1.9, .010, G.railWidth], m.steel, rail, [0, .029, 0]);
-    this.railSupport = this.box([1.9, M.railBottomY - M.baseTopY, .048], m.dark, rail, [0, (M.railBottomY + M.baseTopY) / 2, 0]);
+    this.railMain = this.machinedBox([1.9, .010, G.railWidth], .00035, m.steel, rail, [0, .029, 0]);
+    this.railSupport = this.box([1.9, M.railBottomY - M.baseTopY, .048], m.anodized, rail, [0, (M.railBottomY + M.baseTopY) / 2, 0]);
     this.railGuides = [];
-    for (const z of [-.019, .019]) { this.box([1.9, .003, .005], m.dark, rail, [0, .035, z]); this.railGuides.push(this.box([1.9, .0015, .002], m.steel, rail, [0, .037, z])); }
-    const ruler = this.part('rail-scale', [0, .025, .056]);
-    const canvas = document.createElement('canvas'); canvas.width = M.rulerPixels; canvas.height = 128; const c = canvas.getContext('2d'); c.fillStyle = '#bcc8ca'; c.fillRect(0, 0, canvas.width, 128);
-    c.strokeStyle = '#213640'; c.fillStyle = '#213640'; c.lineWidth = 3; c.font = '34px sans-serif'; c.textAlign = 'center';
+    for (const z of [-.019, .019]) { this.box([1.9, .003, .005], m.anodized, rail, [0, .035, z]); this.railGuides.push(this.machinedBox([1.9, .0015, .002], .00023, m.steel, rail, [0, .037, z])); }
+    this.box([1.9, .0006, .012], m.dark, rail, [0, .034, 0]);
+    for (const x of [-.953, .953]) this.machinedBox([.008, .016, .053], .001, m.anodized, rail, [x, .032, 0]);
+    const ruler = this.part('rail-scale', [.055, .025, .056]);
+    const canvas = document.createElement('canvas'); canvas.width = M.rulerPixels; canvas.height = 128; const c = canvas.getContext('2d');
+    const finish = c.createLinearGradient(0, 0, 0, canvas.height);
+    finish.addColorStop(0, '#414b51'); finish.addColorStop(.1, '#242b30'); finish.addColorStop(.88, '#293136'); finish.addColorStop(1, '#596066');
+    c.fillStyle = finish; c.fillRect(0, 0, canvas.width, canvas.height);
+    c.font = '600 52px sans-serif'; c.textAlign = 'center';
     this.rulerTicks = [];
-    for (let mm = -900; mm <= 900; mm += 10) { const x = rulerTickPixel(mm); this.rulerTicks.push({ nominalMm: mm, pixelX: x }); c.beginPath(); c.moveTo(x, 0); c.lineTo(x, mm % 100 === 0 ? 49 : mm % 50 === 0 ? 35 : 19); c.stroke(); if (mm % 100 === 0) c.fillText(String(Math.abs(mm)), x, 97); }
+    for (let mm = -900; mm <= 900; mm += 10) {
+      const x = rulerTickPixel(mm), major = mm % 100 === 0, half = mm % 50 === 0;
+      this.rulerTicks.push({ nominalMm: mm, pixelX: x });
+      c.fillStyle = mm === 0 ? '#eec48f' : major || half ? '#e5e4db' : '#b0b6b2';
+      const width = major ? 6 : half ? 4 : 3;
+      c.fillRect(x - width / 2, 5, width, major ? 50 : half ? 34 : 20);
+      if (major) c.fillText(mm === 0 ? '0 mm' : String(Math.abs(mm)), x, 107);
+    }
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy()); this.textures.add(texture);
-    const plate = this.mesh(new THREE.PlaneGeometry(M.rulerLengthM, M.rulerWidthM), this.material({ map: texture, metalness: .5, roughness: .52 }), ruler, [0, .024, .054]); plate.rotation.x = -Math.PI / 2; this.rulerPlate = plate;
-    const ground = this.mesh(new THREE.PlaneGeometry(8, 5), this.material({ color: '#233b45', metalness: .12, roughness: .82 }), this.scene, [0, -.004, 0]); ground.rotation.x = -Math.PI / 2; ground.castShadow = false;
+    this.machinedBox([M.rulerLengthM, .001, M.rulerWidthM + .0016], .00025, m.machined, ruler, [0, .0234, .054]);
+    const plate = this.mesh(new THREE.PlaneGeometry(M.rulerLengthM, M.rulerWidthM), this.material({ map: texture, metalness: .22, roughness: .68 }), ruler, [0, .024, .054]);
+    plate.rotation.x = -Math.PI / 2; plate.castShadow = false; this.rulerPlate = plate;
+    const ground = this.mesh(new THREE.PlaneGeometry(28, 28), m.worktop, this.scene, [0, -.004, 0]); ground.rotation.x = -Math.PI / 2; ground.castShadow = false;
   }
   makeCarriage(id, parent, postTop) {
     const node = this.part(id, [0, .046, .046], parent), m = this.mat;
-    const roof = this.box([.052, M.carriageTopY - M.carriageRoofBottomY, .086], m.dark, node, [0, (M.carriageTopY + M.carriageRoofBottomY) / 2, 0]);
+    const roof = this.machinedBox([.052, M.carriageTopY - M.carriageRoofBottomY, .086], .0014, m.anodized, node, [0, (M.carriageTopY + M.carriageRoofBottomY) / 2, 0]);
     const shoes = [];
     for (const sign of [-1, 1]) {
-      this.box([.052, M.carriageRoofBottomY - M.shoeTopY, M.shoeWidthM], m.dark, node, [0, (M.carriageRoofBottomY + M.shoeTopY) / 2, sign * M.shoeCenterZM]);
+      this.box([.052, M.carriageRoofBottomY - M.shoeTopY, M.shoeWidthM], m.anodized, node, [0, (M.carriageRoofBottomY + M.shoeTopY) / 2, sign * M.shoeCenterZM]);
       shoes.push(this.box([.052, M.shoeTopY - M.shoeBottomY, M.shoeWidthM], m.brass, node, [0, (M.shoeTopY + M.shoeBottomY) / 2, sign * M.shoeCenterZM]));
     }
     this.carriageRoofs.push({ id, roof, shoes });
-    this.box([.042, .003, .069], m.steel, node, [0, .054, 0]);
+    this.machinedBox([.042, .003, .069], .0007, m.machined, node, [0, .054, 0]);
     this.cylinder(.006, postTop - .055, m.steel, node, [0, (.055 + postTop) / 2, 0]);
-    this.cylinder(.009, .017, m.black, node, [0, .064, 0]);
+    this.cylinder(.009, .017, m.anodized, node, [0, .064, 0]);
+    this.cylinder(.0095, .0017, m.machined, node, [0, .072, 0]);
     this.cylinder(.003, .017, m.steel, node, [0, .046, .050], 'z');
     const knob = this.mesh(knurledRingGeometry(.003, .008, .009), m.brass, node, [0, .046, .061]); knob.rotation.y = -Math.PI / 2;
     // A physical pointer and hairline mark the carriage's X datum on the scale.
@@ -145,46 +170,59 @@ export class LensScene {
     const m = this.mat; this.targetRoot = new THREE.Group(); this.screenRoot = new THREE.Group(); this.root.add(this.targetRoot, this.screenRoot);
     this.makeCarriage('target-carriage', this.targetRoot, .105); this.makeCarriage('screen-carriage', this.screenRoot, .101); this.makeCarriage('lens-carriage', this.root, .111);
     const housing = this.part('target-housing', [-.018, .156, .022], this.targetRoot);
-    this.box([.034, .060, .050], m.dark, housing, [-.019, G.axisY, 0]);
-    this.box([.002, .052, .043], m.black, housing, [-.0017, G.axisY, 0]);
-    this.box([.003, .028, .028], m.white, housing, [-.0016, G.axisY, 0]);
-    for (const y of [-.022, .022]) for (const z of [-.017, .017]) this.cylinder(.0016, .002, m.steel, housing, [-.0002, G.axisY + y, z], 'x', 6);
-    this.textPlate('SOURCE', [.034, .010], housing, [-.019, .161, .000], [-Math.PI / 2, 0, Math.PI / 2]);
+    this.machinedBox([.034, .060, .050], .0023, m.anodized, housing, [-.019, G.axisY, 0]);
+    this.machinedBox([.003, .053, .046], .0007, m.machined, housing, [-.0017, G.axisY, 0]);
+    this.machinedBox([.0024, .034, .039], .0006, m.black, housing, [-.0014, G.axisY, 0]);
+    this.machinedBox([.0014, .023, .036], .00035, m.reticle, housing, [-.0008, G.axisY, 0]);
+    for (const y of [-.022, .022]) for (const z of [-.0185, .0185]) this.cylinder(.0016, .002, m.steel, housing, [-.0002, G.axisY + y, z], 'x', 6);
+    for (const x of [-.030, -.026, -.022, -.018, -.014, -.010]) this.machinedBox([.0017, .020, .0015], .00055, m.black, housing, [x, G.axisY + .004, .025]);
+    this.textPlate('발광 표적', [.025, .012], housing, [-.019, .1601, .000], [-Math.PI / 2, 0, Math.PI / 2]);
     const pattern = this.part('target-pattern', [0, G.axisY + .003, 0], this.targetRoot);
-    this.targetMesh = this.mesh(imageGeometry(G.targetWidth, G.targetHeight, 1), new THREE.MeshBasicMaterial({ color: '#000000', side: THREE.DoubleSide, toneMapped: false }), pattern, [0, G.axisY, 0]); this.targetMesh.castShadow = false;
+    this.targetPattern = pattern;
+    this.targetMesh = this.mesh(imageGeometry(G.targetWidth, G.targetHeight, 1), m.reticle, pattern, [0, G.axisY, 0]); this.targetMesh.castShadow = false;
     const frame = this.part('screen-frame', [.003, G.axisY + .031, .022], this.screenRoot);
-    for (const y of [-.029, .029]) this.box([.006, .008, .066], m.dark, frame, [.003, G.axisY + y, 0]);
-    for (const z of [-.029, .029]) this.box([.006, .050, .008], m.dark, frame, [.003, G.axisY, z]);
-    this.box([.002, .050, .050], m.black, frame, [.003, G.axisY, 0]);
+    for (const y of [-.029, .029]) this.machinedBox([.008, .009, .066], .001, m.anodized, frame, [.0035, G.axisY + y, 0]);
+    for (const z of [-.029, .029]) this.machinedBox([.008, .050, .009], .001, m.anodized, frame, [.0035, G.axisY, z]);
+    this.machinedBox([.003, .055, .055], .0007, m.dark, frame, [.0035, G.axisY, 0]);
+    for (const y of [-.029, .029]) for (const z of [-.0285, .0285]) this.cylinder(.00125, .0012, m.machined, frame, [-.0004, G.axisY + y, z], 'x', 6);
     const screen = this.part('screen-surface', [0, G.axisY + .010, 0], this.screenRoot);
     // The optical raster remains at X=0; the substrate joins the rear frame.
     this.screenBacking = this.mesh(screenBackingGeometry(), m.white, screen, [0, G.axisY, 0]);
-    this.screenMesh = this.mesh(imageGeometry(G.screenWidth, G.screenHeight, -1), new THREE.MeshBasicMaterial({ color: '#000000', side: THREE.DoubleSide, toneMapped: false }), screen, [0, G.axisY, 0]); this.screenMesh.castShadow = false;
+    this.screenMesh = this.mesh(imageGeometry(G.screenWidth, G.screenHeight, -1), m.screen, screen, [0, G.axisY, 0]); this.screenMesh.castShadow = false;
     const cable = this.part('power-cable', [-.06, .030, -.06], this.targetRoot);
     const points = [[-.036, G.axisY, 0], [-.050, .125, -.006], [-.058, .050, -.030], [-.080, .025, -.064], [-.150, .025, -.068], [-.180, .026, -.060]].map(V);
     this.mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 64, .002, 10, false), m.rubber, cable);
     this.cylinder(.004, .009, m.black, cable, [-.039, G.axisY, 0], 'x');
+    for (const x of [-.040, -.043, -.046]) this.cylinder(.0034, .0011, m.rubber, cable, [x, G.axisY - (Math.abs(x) - .040) * .85, 0], 'x');
   }
   buildLens() {
-    const ring = this.part('lens-ring', [0, G.axisY + .019, .008]);
+    const ring = this.part('lens-ring', [0, G.axisY + .019, .008]), m = this.mat;
     this.mesh(finishedRingGeometry(M.barrelBoreRadiusM, G.lensRingRadius, .006), this.mat.anodized, ring, [0, G.axisY, 0]);
-    for (const x of [-.0035, .0035]) this.mesh(finishedRingGeometry(.013, .019, .001, .00009), this.mat.machined, ring, [x, G.axisY, 0]);
+    for (const x of [-.0035, .0035]) this.mesh(finishedRingGeometry(.013, .019, .001, .00009), m.dark, ring, [x, G.axisY, 0]);
+    this.mesh(finishedRingGeometry(.0177, .0182, .00036, .00008), m.machined, ring, [.00395, G.axisY, 0]);
+    this.mesh(finishedRingGeometry(.0219, .02235, .0042, .0001), m.anodized, ring, [0, G.axisY, 0]);
+    this.machinedBox([.010, .007, .013], .0015, m.anodized, ring, [0, .108, 0]);
     this.seats = [-1, 1].map(side => ({ side, mesh: this.mesh(seatGeometry(side), this.mat.anodized, ring, [0, G.axisY, 0]) }));
-    for (let i = 0; i < 3; i++) { const a = i * TAU / 3; this.cylinder(.0015, .008, this.mat.brass, ring, [0, G.axisY + .021 * Math.cos(a), .021 * Math.sin(a)], 'x', 6); }
+    for (let i = 0; i < 3; i++) { const a = i * TAU / 3; this.cylinder(.00125, .008, m.machined, ring, [0, G.axisY + .0208 * Math.cos(a), .0208 * Math.sin(a)], 'x', 6); }
     const glass = this.part('lens-glass', [0, G.axisY + .006, .006]);
-    const glassMaterial = new THREE.MeshPhysicalMaterial({ color: '#b6e7e9', transmission: .83, thickness: .004, roughness: .035, metalness: 0, ior: 1.5, transparent: true, opacity: .65, side: THREE.DoubleSide, depthWrite: false }); this.materials.add(glassMaterial);
+    const glassMaterial = coatedGlassMaterial(); this.materials.add(glassMaterial);
     this.glassMesh = this.mesh(glassGeometry(), glassMaterial, glass, [0, G.axisY, 0]); this.glassMesh.castShadow = false;
+    this.glassMesh.renderOrder = 2;
     const iris = this.part('iris', [-.004, G.axisY + .011, .006]);
-    this.irisMesh = this.mesh(ringGeometry(.009, .013, M.irisThicknessM), this.mat.black, iris, [M.irisPlaneXM, G.axisY, 0]);
-    this.mesh(finishedRingGeometry(.0196, .022, .0015, .0001), this.mat.anodized, iris, [-.00375, G.axisY, 0]);
+    this.irisMesh = this.mesh(ringGeometry(.009, .0132, M.irisThicknessM), m.black, iris, [M.irisPlaneXM, G.axisY, 0]);
+    this.irisPetals = this.mesh(irisPetalGeometry(), m.blades, iris, [M.irisPlaneXM, G.axisY, 0]);
+    this.irisPetals.castShadow = false; this.irisPetals.userData.nonPickable = true;
+    shapeIrisPetals(this.irisPetals.geometry, .009, M.irisThicknessM / 2, apertureControlAngle(18));
+    this.mesh(finishedRingGeometry(.0196, .022, .0015, .0001), m.anodized, iris, [-.00375, G.axisY, 0]);
     this.irisControl = new THREE.Group(); this.irisControl.position.y = G.axisY; iris.add(this.irisControl);
-    this.mesh(finishedRingGeometry(.0134, .0195, .0007, .00008), this.mat.machined, this.irisControl, [-.00435, 0, 0]);
-    this.irisKnob = this.mesh(knurledRingGeometry(.0008, .0027, .003, 24), this.mat.brass, this.irisControl, [-.0062, .0175, 0]);
-    this.cylinder(.0008, .0036, this.mat.steel, this.irisControl, [-.0060, .0175, 0], 'x');
-    for (const diameter of [6, 12, 18]) {
+    this.mesh(knurledRingGeometry(.013, .0195, .0012, 72), m.machined, this.irisControl, [-.00435, 0, 0]);
+    this.irisKnob = this.mesh(knurledRingGeometry(.0008, .0027, .003, 24), m.brass, this.irisControl, [-.0062, .0175, 0]);
+    this.cylinder(.0008, .0036, m.steel, this.irisControl, [-.0060, .0175, 0], 'x');
+    for (const diameter of [6, 9, 12, 15, 18]) {
       const angle = apertureControlAngle(diameter);
-      const tick = this.box([.00008, .0013, .00017], this.mat.white, iris, [-.00455, G.axisY + .0204 * Math.cos(angle), .0204 * Math.sin(angle)]); tick.rotation.x = angle;
-      this.textPlate(String(diameter), [.0021, .0015], iris, [-.00458, G.axisY + .0212 * Math.cos(angle), .0212 * Math.sin(angle)], [0, -Math.PI / 2, 0]);
+      const major = diameter % 6 === 0;
+      const tick = this.box([.00008, major ? .0013 : .00075, .00017], m.white, iris, [-.00455, G.axisY + .0204 * Math.cos(angle), .0204 * Math.sin(angle)]); tick.rotation.x = angle;
+      if (major) this.textPlate(String(diameter), [.0021, .0015], iris, [-.00458, G.axisY + .0212 * Math.cos(angle), .0212 * Math.sin(angle)], [0, -Math.PI / 2, 0]);
     }
     this.apertureRadius = .009;
   }
@@ -209,53 +247,76 @@ export class LensScene {
     if (this[key]) { this.textures.delete(this[key].texture); this[key].texture.dispose(); }
     const texture = new THREE.DataTexture(raster.rgba, raster.width, raster.height, THREE.RGBAFormat); texture.flipY = false; texture.colorSpace = THREE.SRGBColorSpace;
     texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter; texture.generateMipmaps = false; texture.needsUpdate = true; this.textures.add(texture);
-    mesh.material.color.set('#ffffff'); mesh.material.map = texture; mesh.material.needsUpdate = true;
+    // The shared raster supplies the pattern or projected irradiance as an
+    // emissive contribution over the separately lit matte substrate.
+    mesh.material.emissive.set('#ffffff'); mesh.material.emissiveMap = texture; mesh.material.needsUpdate = true;
     this[key] = { texture, raster, checksum: checksum(texture.image.data) };
   }
   clearLines(group) { for (const child of [...group.children]) { child.geometry?.dispose(); child.material?.dispose(); group.remove(child); } }
   line(points, color, parent, dashed = false, opacity = 1) {
     const geometry = new THREE.BufferGeometry().setFromPoints(points.map(V));
-    const material = dashed ? new THREE.LineDashedMaterial({ color, dashSize: .008, gapSize: .005, transparent: true, opacity, depthTest: false }) : new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+    const style = { color, transparent: true, opacity, toneMapped: false, depthWrite: false, fog: false };
+    const material = dashed ? new THREE.LineDashedMaterial({ ...style, dashSize: .008, gapSize: .005, depthTest: false }) : new THREE.LineBasicMaterial(style);
     if (parent === this.rays) { material.clippingPlanes = this.rayClipPlanes; material.clipIntersection = true; }
-    const line = new THREE.Line(geometry, material); if (dashed) line.computeLineDistances(); line.userData.nonPickable = true; parent.add(line); return line;
+    const line = new THREE.Line(geometry, material); if (dashed) line.computeLineDistances(); line.renderOrder = dashed ? 4 : 3; line.userData.nonPickable = true; parent.add(line); return line;
   }
   updateRays(solution) {
-    this.clearLines(this.rays); this.clearLines(this.focusMarker); this.rayLines = [];
+    this.clearLines(this.rays); this.clearLines(this.focusMarker); this.rayLines = []; this.focusMarkerPoints = [];
     const r = solution.config.apertureDiameterMm / 2;
-    for (const [objectPoint, color] of [[{ horizontalMm: 0, verticalMm: 3 }, '#ffc477'], [{ horizontalMm: 3.25, verticalMm: 2.25 }, '#70d9e5']]) {
+    const { scale, horizontalOffsetMm } = targetGeometry(solution.config);
+    for (const [x, y, color] of [[0, 3, '#ffd69b'], [3.25, 2.25, '#84edf5']]) {
+      const objectPoint = { horizontalMm: x * scale + horizontalOffsetMm, verticalMm: y * scale };
       for (const pupil of [{ horizontalMm: 0, verticalMm: 0 }, { horizontalMm: r * .8, verticalMm: r * .6 }, { horizontalMm: -r * .8, verticalMm: -r * .6 }]) {
         const ray = traceRay(solution.config, objectPoint, pupil), points = [ray.object, ray.pupil, ray.screen].map(opticalPointToWorld);
-        this.rayLines.push(this.line(points, color, this.rays, false, .83));
+        this.rayLines.push(this.line(points, color, this.rays, false, .86));
         if (solution.image.kind === 'virtual') {
           const x = Math.max(G.railX[0] * 1000, solution.image.distanceMm);
           const back = opticalPointToWorld({ xMm: x, yMm: ray.pupil.yMm + x * ray.outgoingSlope.yPerX, zMm: ray.pupil.zMm + x * ray.outgoingSlope.zPerX });
-          this.line([points[1], back], color, this.rays, true, .65);
+          this.line([points[1], back], color, this.rays, true, .74);
         }
       }
     }
     if (solution.image.kind !== 'infinity' && solution.image.onBench) {
       const x = solution.image.distanceMm / 1000, c = solution.image.kind === 'virtual' ? '#71dbe6' : '#ffc477';
-      this.line([[x, G.axisY - .022, -.024], [x, G.axisY + .022, -.024], [x, G.axisY + .022, .024], [x, G.axisY - .022, .024], [x, G.axisY - .022, -.024]], c, this.focusMarker, true, .7);
+      this.focusMarkerPoints = [[x, G.axisY - .022, -.024], [x, G.axisY + .022, -.024], [x, G.axisY + .022, .024], [x, G.axisY - .022, .024], [x, G.axisY - .022, -.024]];
+      this.line(this.focusMarkerPoints, c, this.focusMarker, true, .82);
     }
   }
   update(solution, view, { projection, target } = {}) {
     if (this.disposed) return; this.updating = true;
     const previous = this.solution?.config; this.solution = solution; this.view = { ...DEFAULT_VIEW, ...view };
     const positions = carriagePositions(solution.config); this.targetRoot.position.x = positions.targetX; this.screenRoot.position.x = positions.screenX;
+    const targetShape = targetGeometry(solution.config);
+    this.targetPattern.position.z = targetShape.horizontalOffsetMm / 1000;
+    this.targetMesh.scale.set(1, targetShape.scale, targetShape.scale);
     const radius = solution.config.apertureDiameterMm / 2000;
-    if (radius !== this.apertureRadius) { const old = this.irisMesh.geometry; this.geometries.delete(old); old.dispose(); this.irisMesh.geometry = ringGeometry(radius, .013, M.irisThicknessM); this.geometries.add(this.irisMesh.geometry); this.apertureRadius = radius; }
-    this.irisControl.rotation.x = apertureControlAngle(solution.config.apertureDiameterMm);
+    const adjustment = apertureControlAngle(solution.config.apertureDiameterMm);
+    if (radius !== this.apertureRadius) {
+      const old = this.irisMesh.geometry; this.geometries.delete(old); old.dispose();
+      this.irisMesh.geometry = ringGeometry(radius, .0132, M.irisThicknessM); this.geometries.add(this.irisMesh.geometry);
+      shapeIrisPetals(this.irisPetals.geometry, radius, M.irisThicknessM / 2, adjustment);
+      this.apertureRadius = radius;
+    }
+    this.irisControl.rotation.x = adjustment;
     this.pupilGlyph.scale.setScalar(radius); this.pupilGlyph.visible = this.view.structure;
     this.setRaster(this.screenMesh, projection, 'screenRaster'); this.setRaster(this.targetMesh, target, 'targetRaster');
-    if (!previous || Object.keys(solution.config).some(key => solution.config[key] !== previous[key])) this.updateRays(solution);
+    if (!previous || [...Object.keys(previous), ...Object.keys(solution.config)].some(key => solution.config[key] !== previous[key])) this.updateRays(solution);
     this.rays.visible = this.view.rays; this.focusMarker.visible = this.view.focus; this.modelPlane.visible = this.view.structure;
-    this.highlight(); this.note.textContent = this.view.structure ? '청록 원: 0 mm의 계산 구경 · 실제 조리개 표현은 −3 mm · 조립체 내부 광선은 생략'
+    this.highlight(); this.note.textContent = this.view.structure ? '청록 원: 계산 구경 0 mm · 실제 조리개 −3 mm와 코팅은 구조 표현 · 내부 광선 생략'
       : '표적·스크린을 끌어 이동 · 조립체 내부 광선은 표시를 생략합니다';
     const image = solution.image;
     this.focusReadout.textContent = image.kind === 'infinity' ? '유한 초점 없음 · 출사 광선 평행' : `${image.kind === 'virtual' ? '허상 · 역연장 위치' : '실상 위치'} ${image.distanceMm.toFixed(1)} mm${image.onBench ? '' : ' · 레일 밖'}`;
     this.focusReadout.hidden = !this.view.focus; this.updating = false; this.render();
   }
-  highlight() { this.root.traverse(object => { if (object.isMesh && object.userData.partId && object.material.emissive) { object.material.emissive.set(object.userData.partId === this.view.selectedPart ? '#286573' : '#000000'); object.material.emissiveIntensity = object.userData.partId === this.view.selectedPart ? .38 : 0; } }); }
+  highlight() {
+    this.glassMesh.material.uniforms.selection.value = Number(this.view.selectedPart === 'lens-glass');
+    this.root.traverse(object => {
+      if (!object.isMesh || !object.userData.partId || !object.material.emissive || object === this.screenMesh || object === this.targetMesh) return;
+      const selected = object.userData.partId === this.view.selectedPart;
+      object.material.emissive.set(selected ? '#286573' : '#000000');
+      object.material.emissiveIntensity = selected ? .38 : 0;
+    });
+  }
   select(id) { if (!this.components.has(id)) return; this.view.selectedPart = id; this.highlight(); this.render(); this.onSelect(id); }
   pointerRay(event) {
     const rect = this.renderer.domElement.getBoundingClientRect(); this.pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
@@ -345,7 +406,9 @@ export class LensScene {
   resetCamera(preset = 'iso') {
     if (preset === 'screen') return this.focusPart('screen-surface'); this.focusContext = null;
     const nodes = ['target-housing', 'target-carriage', 'lens-ring', 'lens-carriage', 'screen-frame', 'screen-carriage'];
-    return this.fit(nodes.flatMap(id => this.visiblePoints(this.components.get(id).node)), preset === 'side' ? [0, .08, 1] : [-.22, .44, 1]);
+    const points = nodes.flatMap(id => this.visiblePoints(this.components.get(id).node));
+    if (this.view.focus && this.solution?.image.kind === 'virtual') points.push(...this.focusMarkerPoints.map(V));
+    return this.fit(points, preset === 'side' ? [0, .08, 1] : [-.22, .44, 1]);
   }
   focusPart(id) {
     if (!this.components.has(id)) return false; let ids = [id], direction = [-.3, .4, 1];
@@ -354,7 +417,7 @@ export class LensScene {
       for (const x of [-.10, .10]) for (const y of [-M.rulerWidthM / 2, M.rulerWidthM / 2]) points.push(this.rulerPlate.localToWorld(new THREE.Vector3(x, y, 0)));
       const carriage = this.carriageRoofs.find(c => c.id === 'lens-carriage'), pointer = this.pointers.find(p => p.id === 'lens-carriage');
       points.push(...this.visiblePoints(carriage.roof), ...this.visiblePoints(pointer.pointer));
-      this.focusContext = ['rail-scale', 'lens-carriage']; return this.fit(points, [0, 1, .25]);
+      this.focusContext = ['rail-scale', 'lens-carriage']; return this.fit(points, [0, 1, 1.5]);
     }
     if (id.startsWith('target-')) { ids = ['target-housing', 'target-pattern', 'target-carriage']; direction = [1, .20, .16]; }
     else if (id.startsWith('screen-')) { ids = ['screen-surface', 'screen-frame']; direction = [-1, .13, .15]; }

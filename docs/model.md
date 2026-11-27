@@ -4,7 +4,7 @@ Lens Lab은 하나의 이상적인 볼록 얇은 렌즈를 통과하는 근축 �
 
 ## 입력과 좌표
 
-모형 식별자는 `thin-lens-paraxial-1`입니다. 입력은 다음 네 값으로 제한합니다.
+모형 식별자는 `thin-lens-paraxial-1`입니다. 표적 크기와 가로 위치를 생략하면 기본값을 사용합니다.
 
 | 키 | 의미 | 허용값 | 기본값 |
 | --- | --- | --- | --- |
@@ -12,8 +12,10 @@ Lens Lab은 하나의 이상적인 볼록 얇은 렌즈를 통과하는 근축 �
 | `objectDistanceMm` | 표적과 렌즈 사이 거리 u | 100–900 mm | 300 |
 | `screenDistanceMm` | 렌즈와 스크린 사이 거리 s | 100–900 mm | 360 |
 | `apertureDiameterMm` | 원형 조리개 지름 D | 6–18 mm | 18 |
+| `targetSizeMm` | 정사각형 표적 영역의 한 변 | 6–18 mm | 12 |
+| `targetOffsetMm` | 광축에서 표적 중심까지의 가로 변위 | −8–+8 mm | 0 |
 
-광축은 x축이고 렌즈 면은 x=0, 표적은 x=−u, 스크린은 x=s입니다. 표적의 가로 좌표는 z, 세로 좌표는 y에 대응하며 광축 중심을 0으로 둡니다. `traceRay`는 mm를 반환합니다. 3D 장면은 이를 m로 변환하고 광축 높이 0.13 m를 y에 더합니다. 표적은 12×12 mm, 스크린은 48×48 mm입니다.
+광축은 x축이고 렌즈 면은 x=0, 표적은 x=−u, 스크린은 x=s입니다. 표적의 가로 좌표는 z, 세로 좌표는 y에 대응하며 광축 중심을 0으로 둡니다. `traceRay`는 mm를 반환합니다. 3D 장면은 이를 m로 변환하고 광축 높이 0.13 m를 y에 더합니다. 스크린은 48×48 mm입니다.
 
 ## 상과 실제 광선
 
@@ -34,7 +36,7 @@ u가 f에 매우 가까워도 상의 위치를 임의의 레일 끝으로 자르
 
 ## 광량과 화면 밝기
 
-표적은 일정한 단색 휘도를 가진 것으로 가정합니다. 조리개는 균일한 원형 동공이며 렌즈 흡수, 비네팅과 큰 각도에서의 보정은 생략합니다. 같은 표적의 기준 조건 D=18 mm, u=300 mm에 대한 상대 수집 광량은 다음과 같습니다.
+표적은 일정한 단색 휘도를 가진 것으로 가정합니다. 조리개는 균일한 원형 동공이며 렌즈 흡수, 비네팅과 큰 각도에서의 보정은 생략합니다. 기준 조건 D=18 mm, u=300 mm에 대한 발광 면적당 상대 수집 광량은 다음과 같습니다.
 
 ```text
 collectedRelative = (D/18)² · (300/u)²
@@ -43,7 +45,9 @@ irradianceScale   = (D/18)² · (300/s)²
 
 조리개 면적에 비례하는 통과 광량과 유한한 물체 거리의 구분은 [Edmund Optics의 System Throughput, f/#, and Numerical Aperture](https://www.edmundoptics.com/knowledge-center/application-notes/imaging/lens-iris-aperture-setting/)에 설명되어 있습니다. 위 비율의 기준값과 아래 영상 적분은 이 앱의 명시적인 이상 모형입니다. lux, W 또는 카메라 센서의 실측값을 뜻하지 않습니다.
 
-표적 마스크를 B배 한 뒤 반지름 b의 정규화된 원판으로 합성곱하고 `irradianceScale`을 곱합니다. 무한한 스크린에 대한 선형 영상 적분은 `표적 면적 × collectedRelative`가 됩니다. 따라서 D를 18에서 6 mm로 줄이면 수집 광량은 1/9이 됩니다. 실제 48 mm 스크린 밖으로 나간 빛은 잘리며, 남은 영상을 다시 밝게 정규화하지 않습니다.
+표적의 문양 전체를 `targetSizeMm / 12`배 확대·축소한 뒤 가로로 `targetOffsetMm`만큼 이동합니다. 이 마스크를 스크린 중심 배율 B로 변환한 뒤 반지름 b의 정규화된 원판으로 합성곱하고 `irradianceScale`을 곱합니다. 흐림 적용 전 표적 영역의 스크린 폭은 `|B| × targetSizeMm`이고 가로 중심은 `B × targetOffsetMm`입니다. 이때 중심은 정사각형 표적 영역의 중심입니다.
+
+무한한 스크린에 대한 선형 영상 적분은 `표적 발광 면적 × collectedRelative`가 됩니다. 따라서 표적의 한 변을 12에서 18 mm로 늘리면 같은 휘도에서 적분 광량은 2.25배가 됩니다. D를 18에서 6 mm로 줄이면 면적당 수집 광량은 1/9이 됩니다. 실제 48 mm 스크린 밖으로 나간 빛은 잘리며, 표시 노출은 고정합니다.
 
 `linear`에는 이 선형 상대 밝기가 들어갑니다. `rgba`는 모든 조건에서 같은 노출과 같은 표시 변환을 사용합니다.
 
@@ -68,29 +72,30 @@ irradianceScale   = (D/18)² · (300/s)²
 
 `src/physics.js`는 DOM과 Three.js에 의존하지 않습니다.
 
-- `CONFIG_BOUNDS`, `DEFAULT_CONFIG`, `MODEL_VERSION`: 변경할 수 없는 입력 경계와 모형 식별자입니다.
+- `CONFIG_BOUNDS`, `DEFAULT_CONFIG`, `DEFAULT_TARGET_CONFIG`, `MODEL_VERSION`: 변경할 수 없는 입력 경계, 거리·조리개 기본값, 표적 기본값과 모형 식별자입니다.
 - `normalizeConfig(input)`: 현재 조작값을 기본값·범위 안으로 정리합니다. 허용 초점 거리가 아니면 가장 가까운 값을 선택하며 같은 거리이면 작은 값을 선택합니다.
-- `assertConfig(config)`: 정확한 네 키, 유한한 숫자, 범위와 초점 거리 열거값을 검사합니다. 원본을 변경하거나 잘못된 파일 값을 보정하지 않습니다. 성공 시 원본을 반환하고 실패 시 `TypeError` 또는 `RangeError`를 냅니다.
+- `assertConfig(config)`: 필수 네 키와 선택 표적 키, 유한한 숫자, 범위와 초점 거리 열거값을 검사합니다. 원본을 변경하거나 잘못된 파일 값을 보정하지 않습니다. 성공 시 원본을 반환하고 실패 시 `TypeError` 또는 `RangeError`를 냅니다.
+- `targetGeometry(config)`: 생략 가능한 표적 조건을 `{sizeMm,horizontalOffsetMm,scale}`로 돌려줍니다. `scale`은 12 mm 원본에 대한 크기 비율입니다.
 - `solveOptics(config)`: `{modelVersion, config, image, screen, light}`를 반환합니다. `image`는 `{kind,distanceMm,magnification,onBench}`, `screen`은 `{pupilScale,objectScale,blurRadiusMm,irradianceScale}`, `light`는 `{collectedRelative}`입니다.
-- `traceRay(config, objectPoint, pupilPoint)`: 각 점은 `{horizontalMm,verticalMm}`이며 표적점은 각 축 ±6 mm, 동공점은 반지름 D/2 안에 있어야 합니다. 동공 경계 10⁻¹⁰ mm 이내의 부동소수점 초과만 원 안으로 되돌립니다. `{object,pupil,screen,outgoingSlope}`를 반환합니다. 세 점은 `{xMm,yMm,zMm}`, 기울기는 `{yPerX,zPerX}`입니다.
+- `traceRay(config, objectPoint, pupilPoint)`: 각 점은 광축 기준 `{horizontalMm,verticalMm}`입니다. 표적점은 설정한 크기와 위치의 정사각형 안에, 동공점은 반지름 D/2 안에 있어야 합니다. 동공 경계 10⁻¹⁰ mm 이내의 부동소수점 초과만 원 안으로 되돌립니다. `{object,pupil,screen,outgoingSlope}`를 반환합니다. 세 점은 `{xMm,yMm,zMm}`, 기울기는 `{yPerX,zPerX}`입니다.
 
-`src/projection.js`의 `makeTarget({size=192})`, `makeProjection(solution,{size=192})`는 매번 독립적인 버퍼를 반환합니다. `size`는 16–512의 정수입니다. 반환값은 `{width,height,physicalWidthMm,physicalHeightMm,linear,rgba}`이고 배열 형식은 각각 `Float32Array`, `Uint8ClampedArray`입니다. 첫 행이 양의 세로 방향이고 열은 가로 방향으로 증가합니다. `makeProjection`은 현재 `solveOptics` 결과의 도출값이 입력 설정과 일치하는지도 검사합니다. 2D 검사 화면과 3D 스크린은 이 같은 `rgba`를 사용해야 합니다.
+`src/projection.js`의 `makeTarget({size=192,targetSizeMm=12})`, `makeProjection(solution,{size=192})`는 매번 독립적인 버퍼를 반환합니다. `size`는 16–512의 정수입니다. `makeTarget`은 표적 자체를 담는 정사각형 영상과 실제 치수를 돌려줍니다. 반환값은 `{width,height,physicalWidthMm,physicalHeightMm,linear,rgba}`이고 배열 형식은 각각 `Float32Array`, `Uint8ClampedArray`입니다. 첫 행이 양의 세로 방향이고 열은 가로 방향으로 증가합니다. `makeProjection`은 현재 `solveOptics` 결과의 도출값이 입력 설정과 일치하는지도 검사합니다. 2D 검사 화면과 3D 스크린은 이 같은 `rgba`를 사용해야 합니다.
 
-카메라·선택·라벨 변경은 광학 입력이 아니므로 재계산할 필요가 없습니다. 투영 버퍼는 네 설정값을 키로 재사용할 수 있습니다. CPU 시간은 기기와 조건에 따라 다르며, 큰 해상도의 계산은 픽셀 수에 따라 늘어납니다.
+카메라·선택·라벨 변경은 광학 입력이 아니므로 재계산할 필요가 없습니다. 투영 버퍼는 광학 설정값을 키로 재사용할 수 있습니다. CPU 시간은 기기와 조건에 따라 다르며, 큰 해상도의 계산은 픽셀 수에 따라 늘어납니다.
 
 ## 적용 한계와 확인 명령
 
 렌즈의 실제 두께·재질·곡률에 따른 면별 굴절, 색수차·구면수차, 회절·간섭, 파장, 조리개 날 모양, 센서 잡음과 눈의 적응은 계산하지 않습니다. 유리 외형과 광선의 밝은 선은 구조 설명용 표현입니다. 특히 조리개를 줄일수록 무조건 실제 광학 해상도가 좋아진다는 결론은 이 모형의 범위를 벗어납니다. 단일 렌즈와 정지 표적의 즉시 평형 관계만 다루며 시간·광속 애니메이션 상태는 없습니다.
 
 ```sh
-node --test tests/physics.test.mjs tests/projection.test.mjs
+node --test tests/physics.test.mjs tests/projection.test.mjs tests/target-conditions.test.mjs
 ```
 
 물리·투영 단위 검사는 광학 관계와 수치 적분을 확인합니다. 실제 앱의 조작, 3D 텍스처 방향, 파일 저장, 설치 동작과 시각적 가독성은 별도의 통합 검사가 필요합니다.
 
 ## 1.1 상세 관찰: 출사 광선과 스크린 위치 허용 범위
 
-`src/detail-model.js`는 기존 해의 관찰값만 도출합니다. 모형 식별자, 네 광학 입력, 저장 형식과 투영 버퍼 계산은 바꾸지 않습니다. 모든 길이는 기존 광학 API와 같이 mm이며, 3D 외형에서 가져온 치수만 m에서 mm로 변환합니다.
+`src/detail-model.js`는 현재 광학 해에서 관찰값을 도출합니다. 모든 길이는 광학 API와 같이 mm이며, 3D 외형에서 가져온 치수는 m에서 mm로 변환합니다.
 
 `lensDetail(config, solution = solveOptics(config), {blurRadiusLimitMm = 0.1} = {})`는 정확한 설정과 그 설정의 해가 일치하는지 검증하고 다음 독립 객체를 반환합니다. 설정·해를 수정하거나 범위 밖 입력을 보정하지 않습니다.
 

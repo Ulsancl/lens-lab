@@ -1,9 +1,10 @@
 import { archiveOriginal } from './recovery.js';
 import './style.css';
+import './conditions.css';
 import './detail.css';
 import { lensDetail } from './detail-model.js';
 import { renderLensDetails } from './detail-panel.js';
-import { DEFAULT_CONFIG, normalizeConfig, solveOptics } from './physics.js';
+import { CONFIG_BOUNDS, DEFAULT_CONFIG, DEFAULT_TARGET_CONFIG, normalizeConfig, solveOptics, targetGeometry } from './physics.js';
 import { makeTarget, makeProjection } from './projection.js';
 import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW } from './project.js';
 import { COMPONENTS } from './geometry.js';
@@ -14,11 +15,12 @@ const STORAGE_KEY = 'lens-lab-project-v1', desktop = window.lensDesktop;
 let config = normalizeConfig(DEFAULT_CONFIG), solution = solveOptics(config), view = normalizeView(DEFAULT_VIEW), comparison = null;
 let initialCamera = null, scene, guide = null, previous = null, busy = false, restoring = false, focused = false;
 let storageBlocked = false, recoveredRaw = null, saveTimer, toastTimer, pendingDrag = null, dragFrame = null;
-let projection, projectionKey, comparedProjection, comparisonKey, projectionMode='current';
-const target = makeTarget({ size:192 });
+let projection, projectionKey, target, comparedProjection, comparisonKey, projectionMode='current';
 const number = (value, digits=2) => (Math.abs(value) < .5*10**-digits ? 0 : value).toLocaleString('ko-KR',{minimumFractionDigits:digits,maximumFractionDigits:digits});
+const signed = (value, digits=2) => `${value >= .5*10**-digits ? '+' : ''}${number(value,digits)}`;
 const text = (selector,value) => { $(selector).textContent = value; };
-const same = (a,b) => Object.keys(DEFAULT_CONFIG).every(key => a[key] === b[key]);
+const conditionValue = (settings,key) => settings[key] ?? DEFAULT_TARGET_CONFIG[key];
+const same = (a,b) => Object.keys(CONFIG_BOUNDS).every(key => a[key] === b[key]);
 const near = (a,b,tolerance=.001) => Math.abs(a-b) <= tolerance;
 const kindName = value => ({real:'실상',virtual:'허상',infinity:'무한대'})[value];
 function dismissToast() { clearTimeout(toastTimer); $('#toast').hidden=true; }
@@ -31,12 +33,19 @@ function protectOriginal(raw,future){recoveredRaw=raw;storageBlocked=true;try{ar
 try{const raw=localStorage.getItem(STORAGE_KEY);if(raw!==null){try{const saved=parseProject(raw);({config,comparison}=saved);({view,camera:initialCamera}=saved.observation);solution=solveOptics(config);}catch(error){protectOriginal(raw,error.futureVersion);}}}catch{storageBlocked=true;text('#save-status','자동 저장을 사용할 수 없습니다 · 파일로 보관하세요');}
 
 function setBusy(value){busy=value;$('#save-project').disabled=value;$('#open-project').disabled=value;if(desktop?.setBusy)Promise.resolve(desktop.setBusy(value)).catch(()=>{});}
-function syncControls(){for(const input of $$('[data-number]'))input.value=config[input.dataset.number];for(const input of $$('[data-range]')){const value=config[input.dataset.range];input.step='any';input.value=value;input.setAttribute('aria-valuetext',`${number(value,9)} mm`);}for(const input of $$('[data-view]'))input.checked=view[input.dataset.view];$('#part-select').value=view.selectedPart;$('#focus-part-select').value=view.selectedPart;$$('[data-lesson]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.lesson===guide?.id)));}
+function syncControls(){for(const input of $$('[data-number]'))input.value=conditionValue(config,input.dataset.number);for(const input of $$('[data-range]')){const value=config[input.dataset.range];input.step='any';input.value=value;input.setAttribute('aria-valuetext',`${number(value,9)} mm`);}for(const input of $$('[data-view]'))input.checked=view[input.dataset.view];$('#part-select').value=view.selectedPart;$('#focus-part-select').value=view.selectedPart;$$('[data-lesson]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.lesson===guide?.id)));}
 function remember(){flushDrag();previous={project:capture(),guide:structuredClone(guide)};$('#undo-new').hidden=false;}
 function readProject(project,restoredGuide=null){const saved=parseProject(serializeProject(project));cancelDrag();restoring=true;try{({config,comparison}=saved);({view,camera:initialCamera}=saved.observation);solution=solveOptics(config);guide=restoredGuide;syncControls();refresh();if(initialCamera)scene?.setCameraState(initialCamera);else scene?.resetCamera();}finally{restoring=false;}saveLocal();}
 function newExperiment(){if(busy)return;remember();initialCamera=null;config=normalizeConfig(DEFAULT_CONFIG);solution=solveOptics(config);comparison=null;guide=null;view=normalizeView(DEFAULT_VIEW);syncControls();refresh();scene?.resetCamera();saveLocal();toast('새 광학 실험입니다. 직전 실험은 되돌릴 수 있습니다.');}
-function fixedLessonValues(){if(!guide||guide.status!=='active')return{};if(guide.id==='focus')return{focalLengthMm:150,objectDistanceMm:300,apertureDiameterMm:18};if(guide.id==='image')return{focalLengthMm:150,apertureDiameterMm:18};return guide.stage===0?{focalLengthMm:150,objectDistanceMm:300,screenDistanceMm:320}:{focalLengthMm:150,objectDistanceMm:300,apertureDiameterMm:6};}
-function changeConfig(patch,{guided=false}={}){if(busy)return;const next=normalizeConfig({...config,...patch});if(same(config,next))return;if(!guided&&Object.entries(fixedLessonValues()).some(([key,value])=>!near(next[key],value))){guide.status='interrupted';guide.notice='안내의 고정 조건을 바꿨습니다. 지금 조건에서 자유롭게 관찰하거나 안내를 다시 시작하세요.';}config=next;solution=solveOptics(config);syncControls();refresh();scheduleSave();}
+function fixedLessonValues() {
+  if (!guide || guide.status !== 'active') return {};
+  const fixed = { ...DEFAULT_TARGET_CONFIG, focalLengthMm: 150 };
+  if (guide.id === 'focus') return { ...fixed, objectDistanceMm: 300, apertureDiameterMm: 18 };
+  if (guide.id === 'image') return { ...fixed, apertureDiameterMm: 18 };
+  return guide.stage === 0 ? { ...fixed, objectDistanceMm: 300, screenDistanceMm: 320 }
+    : { ...fixed, objectDistanceMm: 300, apertureDiameterMm: 6 };
+}
+function changeConfig(patch,{guided=false}={}){if(busy)return;const next=normalizeConfig({...config,...patch});if(same(config,next))return;if(!guided&&Object.entries(fixedLessonValues()).some(([key,value])=>!near(conditionValue(next,key),value))){guide.status='interrupted';guide.notice='안내의 고정 조건을 바꿨습니다. 지금 조건에서 자유롭게 관찰하거나 안내를 다시 시작하세요.';}config=next;solution=solveOptics(config);syncControls();refresh();scheduleSave();}
 function queueDrag(patch){if(busy)return;pendingDrag={...(pendingDrag??{}),...patch};if(dragFrame===null)dragFrame=requestAnimationFrame(()=>{dragFrame=null;const next=pendingDrag;pendingDrag=null;if(next)changeConfig(next);});}
 function cancelDrag(){if(dragFrame!==null)cancelAnimationFrame(dragFrame);dragFrame=null;pendingDrag=null;}
 function flushDrag(){if(pendingDrag){const next=pendingDrag;cancelDrag();changeConfig(next);}}
@@ -54,8 +63,35 @@ function renderGuide(){const panel=$('#lesson-guide');panel.hidden=!guide;$('#gu
   text('#guide-action',action);text('#guide-result',result);$('#guide-next').disabled=!lessonReady();text('#guide-next',lessonReady()?'관찰 확인 · 다음으로':'조건을 맞춘 뒤 관찰 확인');
 }
 function drawRaster(selector,raster){const canvas=$(selector);if(canvas.width!==raster.width)canvas.width=raster.width;if(canvas.height!==raster.height)canvas.height=raster.height;canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(raster.rgba),raster.width,raster.height),0,0);}
-function renderProjectionMode(){if(!comparison)projectionMode='current';const saved=projectionMode==='saved';$('#projection-tabs').hidden=!comparison;$('#screen-preview').hidden=saved;$('#comparison-preview').hidden=!saved;$('#show-current').setAttribute('aria-pressed',String(!saved));$('#show-saved').setAttribute('aria-pressed',String(saved));text('#projection-state',saved?'보관한 조건 · 계측값은 현재 조건':'현재 조건');}
-function refresh(renderScene=true){const key=JSON.stringify(config);if(key!==projectionKey){projection=makeProjection(solution,{size:192});projectionKey=key;projectionMode='current';drawRaster('#screen-preview',projection);drawRaster('#control-preview',projection);}if(renderScene&&scene)scene.update(solution,view,{projection,target});
+function renderProjectionMode() {
+  if (!comparison) projectionMode = 'current';
+  const saved = projectionMode === 'saved';
+  $('#projection-tabs').hidden = !comparison;
+  $('#screen-preview').hidden = saved;
+  $('#comparison-preview').hidden = !saved;
+  $('#show-current').setAttribute('aria-pressed', String(!saved));
+  $('#show-saved').setAttribute('aria-pressed', String(saved));
+  text('#projection-state', saved ? '보관한 조건 · 계측값은 현재 조건' : '현재 조건');
+  const displayed = saved ? solveOptics(comparison.config) : solution;
+  const { sizeMm, horizontalOffsetMm } = targetGeometry(displayed.config), scale = displayed.screen.objectScale;
+  text('#projected-target-readout', `흐림 적용 전 표적 폭 ${number(Math.abs(scale) * sizeMm)} mm · 가로 중심 ${signed(scale * horizontalOffsetMm)} mm`);
+}
+function refresh(renderScene=true){
+  const key = JSON.stringify(config);
+  if (key !== projectionKey) {
+    projection = makeProjection(solution, { size: 192 });
+    projectionKey = key;
+    projectionMode = 'current';
+    drawRaster('#screen-preview', projection);
+    drawRaster('#control-preview', projection);
+  }
+  const { sizeMm, horizontalOffsetMm } = targetGeometry(config);
+  if (target?.physicalWidthMm !== sizeMm) {
+    target = makeTarget({ size: 192, targetSizeMm: sizeMm });
+    drawRaster('#target-preview', target);
+  }
+  text('#target-readout', `${number(sizeMm)} × ${number(sizeMm)} mm 영역\n가로 중심 ${signed(horizontalOffsetMm)} mm`);
+  if(renderScene&&scene)scene.update(solution,view,{projection,target});
   text('#image-kind',kindName(solution.image.kind));text('#image-orientation',solution.image.kind==='real'?'거꾸로 선 상':solution.image.kind==='virtual'?'바로 선 상 · 역연장으로 관찰':'한 물체점의 출사 광선이 평행');
   const distance=solution.image.distanceMm;text('#image-distance',distance===null?'∞':`${Math.abs(distance)>=100000?distance.toExponential(2):number(distance,1)} mm`);text('#image-location',distance===null?'유한한 거리의 초점 없음':solution.image.kind==='virtual'?'물체 쪽 · 스크린에 맺히지 않음':solution.image.onBench?'스크린 쪽 · 레일 안':'스크린 쪽 · 레일 범위 밖');
   text('#magnification',solution.image.magnification===null?'정의되지 않음':`${Math.abs(solution.image.magnification)>10000?solution.image.magnification.toExponential(2):number(solution.image.magnification,2)} 배`);text('#blur-radius',`${number(solution.screen.blurRadiusMm,3)} mm`);text('#collected-light',`${number(solution.light.collectedRelative,3)} ×`);
@@ -63,8 +99,10 @@ function refresh(renderScene=true){const key=JSON.stringify(config);if(key!==pro
   text('#scene-status',view.structure?'렌즈 중심의 모델 평면 · 구조 표현의 유리 두께는 계산에서 제외':'물체·스크린 캐리지를 끌어 이동 · 나머지 공간을 끌어 시점 회전');
   const part=COMPONENTS.find(item=>item.id===view.selectedPart);if(part){text('#part-name',part.name);text('#part-material',part.material);text('#part-description',part.description);}
   renderLensDetails(config,solution,view,lensDetail(config,solution));
-  text('#control-readout',`점 흐림 ${number(solution.screen.blurRadiusMm,3)} mm\n상대 광량 ${number(solution.light.collectedRelative,3)} ×`);
-  $('#comparison').hidden=!comparison;if(comparison){const old=solveOptics(comparison.config),comparedKey=JSON.stringify(comparison.config);if(comparedKey!==comparisonKey){comparedProjection=makeProjection(old,{size:192});comparisonKey=comparedKey;drawRaster('#comparison-preview',comparedProjection);}text('#comparison-summary',`${comparison.label}\n흐림 ${number(old.screen.blurRadiusMm,3)} mm\n상대 광량 ${number(old.light.collectedRelative,3)} ×\n${kindName(old.image.kind)}`);}renderProjectionMode();renderGuide();
+  text('#control-readout',`점 흐림 ${number(solution.screen.blurRadiusMm,3)} mm\n면적당 광량 ${number(solution.light.collectedRelative,3)} ×`);
+  $('#comparison').hidden=!comparison;if(comparison){const old=solveOptics(comparison.config),comparedKey=JSON.stringify(comparison.config);if(comparedKey!==comparisonKey){comparedProjection=makeProjection(old,{size:192});comparisonKey=comparedKey;drawRaster('#comparison-preview',comparedProjection);}
+    const savedTarget = targetGeometry(old.config);
+    text('#comparison-summary',`${comparison.label}\n표적 한 변 ${number(savedTarget.sizeMm)} mm · 가로 중심 ${signed(savedTarget.horizontalOffsetMm)} mm\n흐림 ${number(old.screen.blurRadiusMm,3)} mm\n면적당 광량 ${number(old.light.collectedRelative,3)} ×\n${kindName(old.image.kind)}`);}renderProjectionMode();renderGuide();
 }
 function pinComparison(){flushDrag();comparison={label:`물체 ${number(config.objectDistanceMm,1)} · 스크린 ${number(config.screenDistanceMm,1)} mm`,config:structuredClone(config)};refresh(false);scheduleSave();}
 function browserDownload(contents,name,mime='application/json;charset=utf-8'){const url=URL.createObjectURL(new Blob([contents],{type:mime}));const link=Object.assign(document.createElement('a'),{href:url,download:name});link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -74,7 +112,7 @@ function toggleFocus(){focused=!focused;document.body.classList.toggle('focus-mo
 
 $('#part-select').replaceChildren(...COMPONENTS.map(part=>Object.assign(document.createElement('option'),{value:part.id,textContent:part.name})));
 $('#focus-part-select').replaceChildren(...COMPONENTS.map(part=>Object.assign(document.createElement('option'),{value:part.id,textContent:part.name})));
-$$('[data-number]').forEach(input=>{if(input.type==='number')input.step='any';});drawRaster('#target-preview',target);
+$$('[data-number]').forEach(input=>{if(input.type==='number')input.step='any';});
 try{scene=new LensScene($('#scene'),{onConfigChange:queueDrag,onSelect:id=>{view.selectedPart=id;syncControls();refresh();scheduleSave();},onCameraChange:scheduleSave});if(initialCamera)scene.setCameraState(initialCamera);}catch(error){$('#scene-error').hidden=false;text('#scene-error',`3D 화면을 시작하지 못했습니다. ${error.message}`);}
 syncControls();refresh();if(!initialCamera)scene?.resetCamera();
 $('#settings-form').addEventListener('submit',event=>{event.preventDefault();if(busy||!event.currentTarget.reportValidity())return;const patch=Object.fromEntries($$('[data-number]').map(input=>[input.dataset.number,Number(input.value)]));flushDrag();changeConfig(patch);});
@@ -86,7 +124,7 @@ $$('input[data-number]').forEach(input=>input.addEventListener('keydown',event=>
   if(busy||!Number.isFinite(input.valueAsNumber))return;
   const key=input.dataset.number,typed=input.valueAsNumber;
   // An uncommitted text edit wins; otherwise include the latest queued carriage value.
-  const current=typed!==config[key]?typed:(pendingDrag?.[key]??typed);
+  const current=typed!==conditionValue(config,key)?typed:(pendingDrag?.[key]??typed);
   const increment=(key==='apertureDiameterMm'?.1:1)*(event.shiftKey?.1:1);
   const value=Math.min(Number(input.max),Math.max(Number(input.min),current+directions[event.key]*increment));
   flushDrag();input.value=String(value);changeConfig({[key]:value});

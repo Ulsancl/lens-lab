@@ -1,4 +1,5 @@
 import { describeLensDetail } from './detail-readouts.js';
+import { renderConditionGraphics } from './condition-graphics.js';
 
 const $ = selector => document.querySelector(selector);
 const number = (value, digits = 3) => {
@@ -94,5 +95,6 @@ export function renderLensDetails(config, solution, view, detail) {
   quantity('#detail-irradiance', detail.light.irradianceScale, '×', 4);
   quantity('#detail-collected', detail.light.collectedRelative, '×', 4);
   $('#bundle-kind').textContent = { converging: '수렴 · 실상 쪽으로 모임', parallel: '평행 · 유한한 초점 없음', diverging: '발산 · 물체 쪽에 허상' }[detail.bundle.kind];
+  renderConditionGraphics(solution, detail, number);
   tolerancePlot(config, detail);
 }

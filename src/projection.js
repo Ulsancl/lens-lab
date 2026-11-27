@@ -1,6 +1,6 @@
-import { MODEL_VERSION, solveOptics } from './physics.js';
+import { CONFIG_BOUNDS, DEFAULT_TARGET_CONFIG, MODEL_VERSION, solveOptics, targetGeometry } from './physics.js';
 
-const TARGET_MM = 12, SCREEN_MM = 48;
+const TARGET_MM = DEFAULT_TARGET_CONFIG.targetSizeMm, SCREEN_MM = 48;
 const EXPOSURE = 1.2;
 // Original, disjoint mask pieces, counterclockwise in horizontal/vertical mm.
 // An upward arrow and an upper-right registration square show both-axis inversion.
@@ -10,8 +10,10 @@ const targetPolygons = [
   [[2.5, 1.5], [4, 1.5], [4, 3], [2.5, 3]],
 ];
 
-function rasterSize(options) {
-  if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => key !== 'size')) throw new TypeError('raster options must contain only size');
+function rasterSize(options, allowedKeys = ['size']) {
+  if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !allowedKeys.includes(key))) {
+    throw new TypeError(`raster options must contain only ${allowedKeys.join(', ')}`);
+  }
   const size = options.size ?? 192;
   if (!Number.isInteger(size) || size < 16 || size > 512) throw new RangeError('raster size must be an integer in 16..512');
   return size;
@@ -40,7 +42,12 @@ function result(size, physicalMm, linear) {
 }
 
 export function makeTarget(options = {}) {
-  const size = rasterSize(options), pitch = TARGET_MM / size;
+  const size = rasterSize(options, ['size', 'targetSizeMm']), pitch = TARGET_MM / size;
+  const { targetSizeMm = TARGET_MM } = options;
+  const bounds = CONFIG_BOUNDS.targetSizeMm;
+  if (!Number.isFinite(targetSizeMm) || targetSizeMm < bounds.min || targetSizeMm > bounds.max) {
+    throw new RangeError('targetSizeMm is outside supported values');
+  }
   const linear = new Float32Array(size * size);
   for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) {
     let coverage = 0;
@@ -49,7 +56,7 @@ export function makeTarget(options = {}) {
     }
     linear[row * size + col] = coverage;
   }
-  return result(size, TARGET_MM, linear);
+  return result(size, targetSizeMm, linear);
 }
 
 function polygonData(vertices) {
@@ -112,9 +119,11 @@ function checkedSolution(solution) {
 
 export function makeProjection(solution, options = {}) {
   const size = rasterSize(options), optics = checkedSolution(solution);
-  const pitch = SCREEN_MM / size, scale = optics.screen.objectScale, radius = optics.screen.blurRadiusMm;
+  const target = targetGeometry(optics.config), objectScale = optics.screen.objectScale;
+  const pitch = SCREEN_MM / size, scale = objectScale * target.scale, radius = optics.screen.blurRadiusMm;
+  const offset = objectScale * target.horizontalOffsetMm;
   const linear = new Float32Array(size * size);
-  const polygons = targetPolygons.map(vertices => polygonData(vertices.map(([x, y]) => [scale * x, scale * y])));
+  const polygons = targetPolygons.map(vertices => polygonData(vertices.map(([x, y]) => [offset + scale * x, scale * y])));
   const radiusSquared = radius * radius, diskArea = Math.PI * radiusSquared;
   // Below this subpixel threshold, finite blur cannot be meaningfully resolved
   // by the pixel quadrature; avoid division by a numerically vanishing disk.
@@ -123,7 +132,7 @@ export function makeProjection(solution, options = {}) {
     let coverage = 0;
     for (const dy of [.25, .75]) for (const dx of [.25, .75]) {
       const x = (col + dx) * pitch - SCREEN_MM / 2, y = SCREEN_MM / 2 - (row + dy) * pitch;
-      if (sharp) coverage += targetMask(x / scale, y / scale) ? .25 : 0;
+      if (sharp) coverage += targetMask((x - offset) / scale, y / scale) ? .25 : 0;
       else {
         let area = 0;
         for (const polygon of polygons) area += diskIntersection(polygon, x, y, radius, radiusSquared, diskArea);
