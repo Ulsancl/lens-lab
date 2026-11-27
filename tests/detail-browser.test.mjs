@@ -277,15 +277,19 @@ try {
 
   await check('Narrow focused facts and the static optical plot remain readable without introducing a hidden clock', async () => {
     await load(fresh({ objectDistanceMm: 225, screenDistanceMm: 450, apertureDiameterMm: 9 })); await page.setViewportSize({ width: 390, height: 844 }); await paint();
-    await page.locator('#focus').click(); const disclosure = page.locator('.focus-detail-panel details'); assert.equal(await disclosure.evaluate(node => node.open), true);
+    await page.locator('#focus').click(); const disclosure = page.locator('.focus-detail-panel details'); assert.equal(await disclosure.evaluate(node => node.open), false);
     const before = await state(), beforeCamera = await camera(); await page.locator('#focus-part-select').selectOption('iris'); cameraNear(await camera(), beforeCamera); assert.deepEqual((await state()).config, before.config);
-    await disclosure.locator('summary').focus(); await page.keyboard.press('Space'); assert.equal(await disclosure.evaluate(node => node.open), false);
-    await page.keyboard.press('Space'); assert.equal(await disclosure.evaluate(node => node.open), true);
+    await disclosure.locator('summary').press('Space'); assert.equal(await disclosure.evaluate(node => node.open), true);
     assert.deepEqual(await facts(true), await facts()); assert.equal(await page.locator('#focus-detail-note').textContent(), await page.locator('#part-detail-note').textContent()); assert.equal(await page.locator('#focus-detail-reference').textContent(), await page.locator('#detail-reference').textContent());
+    await page.keyboard.press('Space'); assert.equal(await disclosure.evaluate(node => node.open), false);
     await page.locator('#focus-part-inline').click(); assert.notDeepEqual(await camera(), beforeCamera);
     const layout = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, height: document.querySelector('#scene').getBoundingClientRect().height }));
     assert.ok(layout.scroll <= layout.width + 1 && layout.height >= 280, JSON.stringify(layout));
     await page.locator('#focus').click(); await edit('aperture', 6); assert.deepEqual(await facts(true), await facts());
+    const optical = page.locator('.optical-detail');
+    assert.equal(await optical.evaluate(node => node.open), false);
+    await optical.locator('summary').press('Enter');
+    assert.equal(await page.locator('#tolerance-plot').isVisible(), true);
     await page.setViewportSize({ width: 1600, height: 1100 }); await paint(); await page.waitForTimeout(300); const stable = await debug(), stableState = await state();
     await page.waitForTimeout(200); assert.equal((await debug()).renderFrame, stable.renderFrame); assert.deepEqual(await state(), stableState); evidence.push({ narrowLayout: layout });
   });

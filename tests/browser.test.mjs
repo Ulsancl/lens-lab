@@ -162,9 +162,80 @@ try{
   });
   await check('desktop and narrow layouts expose controls and projection without horizontal overflow',async()=>{
     await page.locator('#new-project').click();await page.getByRole('button',{name:'알림 닫기'}).click();
-    for(const width of[1600,1024,390]){await page.setViewportSize({width,height:width===390?844:1050});await page.locator('#reset-camera').click();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)<=1,`overflow at ${width}`);for(const id of['object-distance','screen-distance','aperture','screen-preview','save-project','part-select'])assert.equal(await page.locator(`#${id}`).isVisible(),true);await page.screenshot({path:path.join(output,`lens-${width}.png`),fullPage:true});}
+    const parts=page.locator('.inspector');
+    for(const width of [1600,1024,500,390]){
+      const narrow=width<=700;
+      await page.setViewportSize({width,height:narrow?844:1050});
+      await page.locator('#reset-camera').click();
+      await page.waitForFunction(narrow=>document.querySelector('.inspector').open===!narrow,narrow);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)<=1,`overflow at ${width}`);
+      for(const id of ['object-distance','screen-distance','aperture','screen-preview','save-project'])assert.equal(await page.locator(`#${id}`).isVisible(),true);
+      assert.equal(await page.locator('#part-select').isVisible(),!narrow);
+      assert.equal(await parts.locator('summary').isVisible(),narrow);
+      assert.equal(await page.locator('.optical-detail').evaluate(node=>node.open),!narrow);
+      await page.screenshot({path:path.join(output,`lens-${width}.png`),fullPage:true});
+    }
+    await parts.locator('summary').press('Space');
     await page.locator('#part-select').selectOption('screen-surface');await page.locator('#focus-part').click();await page.waitForFunction(()=>{const rect=document.querySelector('#scene').getBoundingClientRect();return rect.top>=-1&&rect.bottom<=innerHeight+1;});
     await page.setViewportSize({width:1600,height:1100});for(const view of['iso','side','screen']){await page.locator(`[data-camera="${view}"]`).click();await page.locator('#scene').screenshot({path:path.join(output,`scene-${view}.png`)});}
+  });
+  await check('500px header actions and disclosures work with keyboard and touch', async () => {
+    const mobile = await browser.newContext({ viewport: { width: 500, height: 900 }, isMobile: true, hasTouch: true, acceptDownloads: true });
+    const touchPage = await mobile.newPage();
+    watch(touchPage);
+    try {
+      await touchPage.goto('http://127.0.0.1:5221/');
+      await touchPage.waitForFunction(() => window.lensLab?.sceneDebug()?.ready);
+      const actions = ['새 실험', '실험 열기', '실험 저장', '도움말'].map(name => touchPage.getByRole('button', { name, exact: true }));
+      const [newProject, openProject, saveProject, help] = actions;
+      const boxes = await Promise.all(actions.map(action => action.boundingBox()));
+      assert.ok(boxes.every(box => box.x >= 0 && box.x + box.width <= 500 && box.y === boxes[0].y && box.width >= 44 && box.height >= 44));
+      await newProject.focus();
+      for (const action of actions.slice(1)) {
+        await touchPage.keyboard.press('Tab');
+        assert.equal(await action.evaluate(node => node === document.activeElement), true);
+      }
+      const dialog = touchPage.getByRole('dialog', { name: 'Lens Lab 사용 안내' });
+      await touchPage.keyboard.press('Enter');
+      assert.equal(await dialog.isVisible(), true);
+      await touchPage.keyboard.press('Escape');
+      assert.equal(await dialog.isVisible(), false);
+      assert.equal(await help.evaluate(node => node === document.activeElement), true);
+      await help.tap();
+      await dialog.getByRole('button', { name: '닫기' }).tap();
+
+      const lesson = touchPage.locator('.lesson-disclosure');
+      const summary = lesson.locator('summary');
+      assert.equal(await lesson.evaluate(node => node.open), false);
+      await summary.press('Enter');
+      await touchPage.locator('[data-lesson="focus"]').tap();
+      await summary.tap();
+      assert.equal(await touchPage.locator('#guide-title').isVisible(), false);
+      const distance = touchPage.locator('#screen-distance');
+      await distance.fill('300');
+      await distance.press('Tab');
+      await summary.tap();
+      await touchPage.locator('#guide-next').tap();
+      assert.equal(await touchPage.evaluate(() => window.lensLab.guide().status), 'completed');
+      await summary.tap();
+
+      const pendingDownload = touchPage.waitForEvent('download');
+      await saveProject.tap();
+      const download = await pendingDownload;
+      const file = path.join(output, 'saved-mobile.lens.json');
+      await download.saveAs(file);
+      const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+      assert.equal(saved.config.screenDistanceMm, 300);
+      await newProject.tap();
+      await touchPage.waitForFunction(() => window.lensLab.getState().config.screenDistanceMm === 360);
+      const pendingOpen = touchPage.waitForEvent('filechooser');
+      await openProject.tap();
+      await (await pendingOpen).setFiles(file);
+      await touchPage.waitForFunction(() => window.lensLab.getState().config.screenDistanceMm === 300);
+      assert.deepEqual(await touchPage.evaluate(() => window.lensLab.project()), saved);
+    } finally {
+      await mobile.close();
+    }
   });
   await check('smaller windows retain a live fixed-exposure projection beside the active distance and aperture controls',async()=>{
     for(const width of[1024,390]){await page.setViewportSize({width,height:768});for(const[id,value]of[['object-distance',330],['screen-distance',340],['aperture',9]]){await input(id,value);await paint();const preview=await page.locator('#control-preview').boundingBox(),inputBox=await page.locator(`#${id}`).boundingBox();assert.ok(preview.y>=0&&preview.y+preview.height<=768,`live preview outside ${width}px viewport for ${id}`);assert.ok(inputBox.y>=0&&inputBox.y+inputBox.height<=768);const bytes=await page.locator('#control-preview').evaluate(canvas=>Array.from(canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data));assert.deepEqual(bytes,await canvasPixels());}await page.screenshot({path:path.join(output,`live-controls-${width}.png`)});await page.locator('#show-observation').click();await page.waitForFunction(()=>{const rect=document.querySelector('.observation').getBoundingClientRect();return rect.top>=-1&&rect.top<200;});}
