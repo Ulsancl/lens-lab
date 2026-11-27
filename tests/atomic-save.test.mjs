@@ -106,19 +106,19 @@ test('Windows saves preserve the target DACL and new files start private', { ski
   const aclSetup = `
     $ErrorActionPreference = 'Stop'
     $request = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())))
-    $dir = Get-Acl -LiteralPath $request.directory
+    $dir = [IO.Directory]::GetAccessControl($request.directory)
     $everyone = [Security.Principal.SecurityIdentifier]::new('S-1-1-0')
     $dir.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($everyone, 'ReadAndExecute',
         'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-    Set-Acl -LiteralPath $request.directory -AclObject $dir
-    $file = Get-Acl -LiteralPath $request.target
+    [IO.Directory]::SetAccessControl($request.directory, $dir)
+    $file = [IO.File]::GetAccessControl($request.target)
     $file.SetAccessRuleProtection($true, $false)
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
     $file.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow'))
     $sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
     $file.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'Read', 'Allow'))
-    Set-Acl -LiteralPath $request.target -AclObject $file
-    $file = Get-Acl -LiteralPath $request.target
+    [IO.File]::SetAccessControl($request.target, $file)
+    $file = [IO.File]::GetAccessControl($request.target)
     [IO.File]::WriteAllText($request.snapshot, $file.GetSecurityDescriptorSddlForm('Access'))
   `;
   const snapshot = path.join(value.directory, 'original-acl.txt');
@@ -128,11 +128,11 @@ test('Windows saves preserve the target DACL and new files start private', { ski
   await runWindowsPowerShell(`
     $ErrorActionPreference = 'Stop'
     $request = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())))
-    $file = Get-Acl -LiteralPath $request.target
+    $file = [IO.File]::GetAccessControl($request.target)
     if ($file.GetSecurityDescriptorSddlForm('Access') -cne [IO.File]::ReadAllText($request.snapshot)) {
         throw 'Target DACL changed'
     }
-    $file = Get-Acl -LiteralPath $request.created
+    $file = [IO.File]::GetAccessControl($request.created)
     $trusted = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $unexpected = $file.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
         Where-Object { $_.IdentityReference.Value -ne $trusted }
