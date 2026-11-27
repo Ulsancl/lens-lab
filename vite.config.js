@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url)));
-const root = normalizePath(fileURLToPath(new URL('.', import.meta.url))).replace(/\/$/, '').replace(/[()[\]{}*?!+@]/g, '\\$&');
+const root = normalizePath(fileURLToPath(new URL('.', import.meta.url))).replace(/\/$/, '').replace(/[\\()[\]{}*?!+@]/g, '\\$&');
 const generated = ['.security-stage-*', '.security-write-*', 'dist', 'output', 'release'].map(name => `${root}/${name}/**`);
 
 export default defineConfig({
