@@ -13,6 +13,11 @@
       <label class="field" for="object-distance">물체 ↔ 렌즈 <span><input id="object-distance" data-number="objectDistanceMm" type="number" min="100" max="900" step="1" value="300" required><small>mm</small></span></label><input aria-label="물체 거리 조절" data-range="objectDistanceMm" type="range" min="100" max="900" step="1" value="300">
       <label class="field" for="screen-distance">렌즈 ↔ 스크린 <span><input id="screen-distance" data-number="screenDistanceMm" type="number" min="100" max="900" step="1" value="360" required><small>mm</small></span></label><input aria-label="스크린 거리 조절" data-range="screenDistanceMm" type="range" min="100" max="900" step="1" value="360">
       <label class="field" for="aperture">조리개 지름 <span><input id="aperture" data-number="apertureDiameterMm" type="number" min="6" max="18" step="0.1" value="18" required><small>mm</small></span></label><input aria-label="조리개 지름 조절" data-range="apertureDiameterMm" type="range" min="6" max="18" step="0.1" value="18">
+      <fieldset class="target-conditions"><legend>물체 표적</legend>
+        <label class="field" for="target-size">표적 한 변 <span><input id="target-size" data-number="targetSizeMm" type="number" min="6" max="18" step="any" value="12" aria-describedby="target-conditions-help" required><small>mm</small></span></label>
+        <label class="field" for="target-offset">가로 이동 <span><input id="target-offset" data-number="targetOffsetMm" type="number" min="-8" max="8" step="any" value="0" aria-describedby="target-conditions-help" required><small>mm</small></span></label>
+        <p id="target-conditions-help" class="muted">표적 중심은 광축에서 가로로 이동합니다. 양수는 표적 좌표의 오른쪽(+Z)입니다.</p>
+      </fieldset>
       <button class="wide" id="apply-settings" type="submit">입력값 적용</button><p class="muted">슬라이더 또는 3D의 물체·스크린 캐리지를 움직여 관찰하세요. 거리는 렌즈 중심에서 잽니다.</p>
     </form><button id="undo-new" class="wide" hidden>직전 실험 되돌리기</button>
   </aside>
@@ -28,10 +33,10 @@
       <section class="detail-card"><h3>조리개와 상대 광량</h3><dl class="derived-readouts"><div><dt>열린 원형 면적</dt><dd id="detail-aperture-area"></dd></div><div><dt>명목 f/D</dt><dd id="detail-fnumber"></dd></div><div><dt>상대 포집 광량</dt><dd id="detail-collected"></dd></div><div><dt>선형 영상 배율 인자</dt><dd id="detail-irradiance"></dd></div></dl><p>포집 광량은 (D/18)² × (300/u)², 영상 인자는 (D/18)² × (300/s)²입니다. 영상 인자는 표적·흐림 합성 결과에 곱하는 값이며 픽셀 밝기 자체나 lux가 아닙니다. 표시 노출은 고정됩니다.</p></section>
     </div></details>
   </section>
-  <aside class="observation panel"><div class="eyebrow">OBSERVE / 실제 투영 결과</div><h2>스크린을 들여다보세요</h2><div class="source-row"><canvas id="target-preview" width="96" height="96" aria-label="발광 물체의 표적"></canvas><div><b>물체 표적</b><p>12 × 12 mm 영역<br>빛나는 비대칭 문양</p></div></div>
+  <aside class="observation panel"><div class="eyebrow">OBSERVE / 실제 투영 결과</div><h2>스크린을 들여다보세요</h2><div class="source-row"><canvas id="target-preview" width="96" height="96" aria-label="현재 발광 표적의 확대 영상"></canvas><div><b>물체 표적 · 확대 보기</b><p id="target-readout"></p></div></div>
     <div id="projection-tabs" class="projection-tabs" role="group" aria-label="같은 크기로 영상 비교" hidden><button id="show-current" aria-pressed="true">현재 영상</button><button id="show-saved" aria-pressed="false">보관한 영상</button></div>
-    <figure class="projection"><canvas id="screen-preview" width="192" height="192" aria-label="같은 광선 계산에서 얻은 현재 스크린 영상"></canvas><canvas id="comparison-preview" width="192" height="192" aria-label="같은 크기와 노출로 표시한 보관 영상" hidden></canvas><figcaption><b id="projection-state">현재 조건</b><br>스크린 48 × 48 mm · 크기·노출 고정</figcaption></figure><p id="screen-explanation"></p>
-    <div class="light-meter"><span>상대 포집 광량</span><strong id="collected-light"></strong><small>D=18 mm · 물체거리 300 mm일 때 1<br>같은 광원의 근축 모형 · lux가 아닙니다</small></div>
+    <figure class="projection"><canvas id="screen-preview" width="192" height="192" aria-label="같은 광선 계산에서 얻은 현재 스크린 영상"></canvas><canvas id="comparison-preview" width="192" height="192" aria-label="같은 크기와 노출로 표시한 보관 영상" hidden></canvas><figcaption><b id="projection-state">현재 조건</b><br>스크린 48 × 48 mm · 크기·노출 고정<br><span id="projected-target-readout"></span></figcaption></figure><p id="screen-explanation"></p>
+    <div class="light-meter"><span>면적당 상대 포집 광량</span><strong id="collected-light"></strong><small>D=18 mm · 물체거리 300 mm일 때 1<br>표적의 발광 면적당 값</small></div>
     <button id="pin-comparison" class="wide">현재 조건을 비교 기준으로</button><div id="comparison" hidden><div class="comparison-heading"><b>보관한 조건</b><button id="clear-comparison">지우기</button></div><div class="comparison-content"><p id="comparison-summary"></p></div><p class="muted">위의 현재·보관 버튼으로 같은 크기와 노출에서 번갈아 비교하세요. 계측값과 3D는 현재 조건입니다.</p></div>
   </aside>
   <section class="inspector panel"><div class="part-selection"><label for="part-select">구조 살펴보기</label><select id="part-select"></select><button id="focus-part">선택 부품 가까이</button></div><div class="part-copy"><span id="part-material" class="tag"></span><h3 id="part-name"></h3><p id="part-description"></p><p id="detail-reference" class="detail-reference"></p><dl id="part-detail-facts" class="detail-facts"></dl><p id="part-detail-note" class="detail-note"></p></div></section>

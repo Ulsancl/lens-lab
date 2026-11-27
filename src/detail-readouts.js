@@ -1,5 +1,6 @@
 import { lensDetail } from './detail-model.js';
 import { COMPONENTS, GEOMETRY as G } from './geometry.js';
+import { targetGeometry } from './physics.js';
 
 const fact = (label, value, unit = '', digits = 2) => ({ label, value, unit, digits });
 const rangeText = range => range ? `${range.minMm.toLocaleString('ko-KR', { maximumFractionDigits: 3 })}–${range.maxMm.toLocaleString('ko-KR', { maximumFractionDigits: 3 })} mm` : '레일 안에 없음';
@@ -30,11 +31,14 @@ export function describeLensDetail(partId, config, solution) {
       break;
     case 'target-housing':
     case 'target-pattern':
-    case 'target-carriage':
-      facts = [fact('물체거리 u', u, 'mm', 3), fact('표적 가로 범위', G.targetWidth * 1000, 'mm'),
-        fact('표적 세로 범위', G.targetHeight * 1000, 'mm'), fact('현재 스크린 중심 배율 B', s.centerScale, '배', 4), magnification(), collected()];
+    case 'target-carriage': {
+      const target = targetGeometry(config);
+      facts = [fact('물체거리 u', u, 'mm', 3), fact('표적 한 변', target.sizeMm, 'mm', 3),
+        fact('표적의 가로 오프셋', target.horizontalOffsetMm, 'mm', 3),
+        fact('현재 스크린 중심 배율 B', s.centerScale, '배', 4), magnification(), collected()];
       note = '표적의 각 점이 만드는 흐림 원 중심은 현재 스크린에서 B = −s/u로 이동합니다. 이 값은 이상 상의 배율 m = −v/u와 다르며 실상 초점면에서만 일치합니다. 상대 광량은 일정한 발광 표적을 가정합니다.';
       break;
+    }
     case 'lens-glass':
       facts = [fact('초점거리 f', f, 'mm'), fact('한 표적점의 출사 광선', kindText[d.bundle.kind]),
         fact('출사 광선 수렴도 q', d.bundle.vergencePerMm, 'mm⁻¹', 7), distance(), magnification(), fact('명목 f/D', a.fNumber, '', 3)];

@@ -6,7 +6,6 @@ export const projectType = 'lens-lab-project';
 export const projectVersion = 1;
 export const projectModelVersion = MODEL_VERSION;
 const MAX_BYTES = 10 * 1024 * 1024;
-const configKeys = ['focalLengthMm', 'objectDistanceMm', 'screenDistanceMm', 'apertureDiameterMm'];
 const flagKeys = ['rays', 'focus', 'structure', 'labels'];
 const partIds = new Set(COMPONENTS.map(part => part.id));
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -60,7 +59,6 @@ function savedCamera(value) {
   return copy(value);
 }
 function savedConfig(value) {
-  shape(value, configKeys, '광학 설정');
   try { assertConfig(value); }
   catch (error) {
     if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;

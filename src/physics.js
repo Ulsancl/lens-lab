@@ -5,9 +5,14 @@ export const CONFIG_BOUNDS = Object.freeze({
   objectDistanceMm: Object.freeze({ min: 100, max: 900 }),
   screenDistanceMm: Object.freeze({ min: 100, max: 900 }),
   apertureDiameterMm: Object.freeze({ min: 6, max: 18 }),
+  targetSizeMm: Object.freeze({ min: 6, max: 18 }),
+  targetOffsetMm: Object.freeze({ min: -8, max: 8 }),
 });
 export const DEFAULT_CONFIG = Object.freeze({ focalLengthMm: 150, objectDistanceMm: 300, screenDistanceMm: 360, apertureDiameterMm: 18 });
-const keys = Object.keys(DEFAULT_CONFIG);
+export const DEFAULT_TARGET_CONFIG = Object.freeze({ targetSizeMm: 12, targetOffsetMm: 0 });
+const defaults = { ...DEFAULT_CONFIG, ...DEFAULT_TARGET_CONFIG };
+const requiredKeys = Object.keys(DEFAULT_CONFIG);
+const keys = Object.keys(defaults);
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const zero = value => Object.is(value, -0) ? 0 : value;
 function record(value, label) {
@@ -23,25 +28,36 @@ function shape(value, expected, label) {
 /** For live controls only. Saved configs must use assertConfig. */
 export function normalizeConfig(input) {
   const value = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return Object.fromEntries(keys.map(key => {
+  const config = {};
+  for (const key of keys) {
     const bounds = CONFIG_BOUNDS[key];
-    let normalized = finite(value[key]) ? Math.min(bounds.max, Math.max(bounds.min, value[key])) : DEFAULT_CONFIG[key];
+    let normalized = finite(value[key]) ? zero(Math.min(bounds.max, Math.max(bounds.min, value[key]))) : defaults[key];
     if (bounds.values && !bounds.values.includes(normalized)) {
       normalized = bounds.values.reduce((best, candidate) => Math.abs(candidate - normalized) < Math.abs(best - normalized) ? candidate : best);
     }
-    return [key, normalized];
-  }));
+    if (requiredKeys.includes(key) || normalized !== defaults[key]) config[key] = normalized;
+  }
+  return config;
 }
 
 /** Exact imported values are validated without clamping or mutation. */
 export function assertConfig(config) {
-  shape(config, keys, 'config');
-  for (const key of keys) {
+  record(config, 'config');
+  const actual = Object.keys(config);
+  if (requiredKeys.some(key => !actual.includes(key)) || actual.some(key => !keys.includes(key))) throw new TypeError('config: missing or unknown field');
+  for (const key of actual) {
     const value = config[key], bounds = CONFIG_BOUNDS[key];
     if (!finite(value)) throw new TypeError(`config.${key}: a finite number is required`);
-    if (value < bounds.min || value > bounds.max || (bounds.values && !bounds.values.includes(value))) throw new RangeError(`config.${key}: outside supported values`);
+    if (Object.is(value, -0) || value < bounds.min || value > bounds.max || (bounds.values && !bounds.values.includes(value))) throw new RangeError(`config.${key}: outside supported values`);
   }
   return config;
+}
+
+/** Resolve optional target settings, including those absent from older projects. */
+export function targetGeometry(config = DEFAULT_CONFIG) {
+  const { targetSizeMm: sizeMm = DEFAULT_TARGET_CONFIG.targetSizeMm,
+    targetOffsetMm: horizontalOffsetMm = DEFAULT_TARGET_CONFIG.targetOffsetMm } = config;
+  return { sizeMm, horizontalOffsetMm, scale: sizeMm / DEFAULT_TARGET_CONFIG.targetSizeMm };
 }
 
 export function solveOptics(config) {
@@ -76,7 +92,10 @@ function point(value, label) {
 
 export function traceRay(config, objectPoint, pupilPoint) {
   assertConfig(config); point(objectPoint, 'objectPoint'); point(pupilPoint, 'pupilPoint');
-  if (Math.abs(objectPoint.horizontalMm) > 6 || Math.abs(objectPoint.verticalMm) > 6) throw new RangeError('objectPoint: outside the 12 mm target');
+  const { sizeMm, horizontalOffsetMm } = targetGeometry(config);
+  const halfSize = sizeMm / 2;
+  if (objectPoint.horizontalMm < horizontalOffsetMm - halfSize || objectPoint.horizontalMm > horizontalOffsetMm + halfSize
+    || Math.abs(objectPoint.verticalMm) > halfSize) throw new RangeError('objectPoint: outside the target');
   const { focalLengthMm: f, objectDistanceMm: u, screenDistanceMm: s, apertureDiameterMm: diameter } = config;
   const radius = diameter / 2, pupilRadius = Math.hypot(pupilPoint.horizontalMm, pupilPoint.verticalMm);
   if (pupilRadius > radius + 1e-10) throw new RangeError('pupilPoint: outside the aperture');

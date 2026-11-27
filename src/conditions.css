@@ -1,0 +1,26 @@
+.target-conditions {
+  min-inline-size: 0;
+  margin: 16px 0 0;
+  padding: 10px 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.target-conditions legend {
+  padding-inline: 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.target-conditions .field:first-of-type {
+  display: flex;
+  margin-top: 0;
+}
+
+.target-conditions .field + .field {
+  margin-top: 8px;
+}
+
+#target-readout {
+  white-space: pre-line;
+}
