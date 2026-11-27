@@ -38,6 +38,15 @@ async function sceneParity(){
 }
 try{
   await page.goto('http://127.0.0.1:5221/');await page.waitForFunction(()=>window.lensLab?.sceneDebug()?.ready);
+  await check('the dev server denies generated diagnostics and serves the source app', async () => {
+    const fixture = path.join(output, 'private-fixture.txt');
+    await fs.writeFile(fixture, 'Local-only verification fixture');
+    try {
+      const url = path.relative(root, fixture).split(path.sep).join('/');
+      const response = await fetch(`http://127.0.0.1:5221/${url}`);
+      assert.equal(response.status, 403);
+    } finally { await fs.unlink(fixture); }
+  });
   await check('offline optical bench starts with fourteen parts and a real static WebGL scene',async()=>{
     assert.equal((await debug()).componentCount,14);assert.deepEqual((await current()).config,DEFAULT_CONFIG);assert.equal(await page.locator('#play').count(),0);
     gpu=await page.evaluate(()=>{const gl=document.querySelector('#scene canvas').getContext('webgl2'),ext=gl.getExtension('WEBGL_debug_renderer_info');return{webgl2:!!gl,renderer:ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER)};});

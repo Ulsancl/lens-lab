@@ -36,14 +36,23 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install locked dependencies and runtimes
         run: |
-          npm ci
+          npm ci --ignore-scripts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:electron_use_remote_checksums, Env:npm_config_electron_use_remote_checksums -ErrorAction SilentlyContinue
           node node_modules/electron/install.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npx --no-install playwright install chromium
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify optics, projection, geometry and experiment data
         run: npm test
+      - name: Verify dependency notices
+        run: |
+          $manifest = Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json
+          $notice = Get-Content -Raw -LiteralPath 'docs/THIRD-PARTY-NOTICES.md'
+          foreach ($tool in @('Electron', 'Vite', 'electron-builder', 'Playwright')) {
+            $version = $manifest.devDependencies.($tool.ToLowerInvariant())
+            if (-not $notice.Contains("$tool $version")) { throw "Incorrect notice version for $tool" }
+          }
       - name: Build web bundle
         run: npm run build
       - name: Verify browser observation and interaction
@@ -59,11 +68,19 @@ jobs:
         timeout-minutes: 10
         run: npm run test:detail
       - name: Package Windows installer
-        run: npm run package:desktop
+        run: |
+          $env:ELECTRON_BUILDER_CACHE = Join-Path $env:RUNNER_TEMP 'lens-electron-builder'
+          npm run package:desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/desktop.mjs package-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify production executable and installer security
+        timeout-minutes: 5
+        run: node tests/packaged-smoke.test.mjs
       - name: Verify independent desktop executable
         timeout-minutes: 10
         run: |
-          $env:LENS_DESKTOP_EXE = Join-Path $env:GITHUB_WORKSPACE 'release/windows/win-unpacked/Lens Lab.exe'
+          $env:LENS_DESKTOP_EXE = Join-Path $env:GITHUB_WORKSPACE 'release/desktop-test/win-unpacked/Lens Lab.exe'
           node tests/desktop.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify installer checksum and required documents
@@ -108,3 +125,23 @@ jobs:
             output/desktop*/profile-*/test-artifacts/native-app-restarted.png
           if-no-files-found: warn
           retention-days: 14
+
+  provenance:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/codex/consumer-release'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Fetch the tested installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: lens-lab-windows-${{ github.sha }}
+          path: installer
+      - name: Attest installer provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: installer/Lens-Lab-Setup-*.exe

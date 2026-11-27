@@ -3,11 +3,6 @@ import { makeTarget } from './projection.js';
 
 // Both image planes share this millimetre viewport. SVG y increases downwards.
 const HALF_WIDTH_MM = 24;
-const GRID = `
-  <path class="condition-grid" d="M-12-24V24M12-24V24M-24-12H24M-24 12H24"/>
-  <path class="condition-axis" d="M0-24V24M-24 0H24"/>
-`;
-
 function targetMask() {
   const { width, height, linear, physicalWidthMm } = makeTarget({ size: 96 });
   const canvas = document.createElement('canvas');
@@ -17,53 +12,24 @@ function targetMask() {
   const pixels = context.createImageData(width, height);
   for (let i = 0; i < linear.length; i++) pixels.data[4 * i + 3] = linear[i] * 255;
   context.putImageData(pixels, 0, 0);
-  const url = canvas.toDataURL();
-  return name => `
-    <mask id="condition-${name}-mask" x="-24" y="-24" width="48" height="48" maskUnits="userSpaceOnUse" mask-type="alpha">
-      <image id="condition-${name}-pattern" href="${url}" x="${-physicalWidthMm / 2}" y="${-physicalWidthMm / 2}"
-        width="${physicalWidthMm}" height="${physicalWidthMm}"/>
-    </mask>
-    <rect class="condition-pattern" x="-24" y="-24" width="48" height="48" mask="url(#condition-${name}-mask)"/>`;
+  return { url: canvas.toDataURL(), physicalWidthMm };
 }
 
 function mountGraphics() {
-  const targetPattern = targetMask();
-  const card = document.createElement('section');
-  card.className = 'detail-card condition-card';
-  card.setAttribute('aria-labelledby', 'condition-title');
-  card.innerHTML = `
-    <div class="condition-heading">
-      <h3 id="condition-title">이상 상과 현재 스크린</h3>
-      <div class="condition-offset">
-        <span>실상 초점 기준 스크린 오프셋</span>
-        <strong id="condition-offset"></strong>
-      </div>
-    </div>
-    <div class="condition-planes">
-      <figure>
-        <figcaption><h4 id="condition-image-title"></h4><p id="condition-image-scale"></p></figcaption>
-        <div class="condition-plane">
-          <svg id="condition-image-plane" viewBox="-24 -24 48 48" role="img">
-            ${GRID}${targetPattern('image')}
-          </svg>
-          <span id="condition-image-empty" class="condition-empty" aria-hidden="true" hidden>유한한 상 없음</span>
-        </div>
-      </figure>
-      <figure>
-        <figcaption><h4 id="condition-screen-title"></h4><p id="condition-screen-scale"></p></figcaption>
-        <div class="condition-plane">
-          <svg id="condition-screen-plane" viewBox="-24 -24 48 48" role="img">
-            ${GRID}<circle id="condition-spot" class="condition-spot"/>
-            ${targetPattern('screen')}
-            <path id="condition-spot-center" class="condition-spot-center" d="M-0.85 0H0.85M0-0.85V0.85"/>
-          </svg>
-        </div>
-      </figure>
-    </div>
-    <p class="condition-legend"><span>비교 범위 48 × 48 mm · 눈금 간격 12 mm</span><span class="condition-spot-key">점 흐림 지름 <b id="condition-blur-diameter"></b></span></p>
-    <p id="condition-note" class="condition-note"></p>`;
+  const { url, physicalWidthMm } = targetMask();
+  const template = document.querySelector('#condition-graphics');
+  const card = template.content.firstElementChild.cloneNode(true);
+  const fields = Object.fromEntries([...card.querySelectorAll('[id]')].map(node => [node.id, node]));
+  for (const plane of ['image', 'screen']) {
+    const image = fields[`condition-${plane}-pattern`];
+    image.setAttribute('href', url);
+    image.setAttribute('x', -physicalWidthMm / 2);
+    image.setAttribute('y', -physicalWidthMm / 2);
+    image.setAttribute('width', physicalWidthMm);
+    image.setAttribute('height', physicalWidthMm);
+  }
   document.querySelector('.detail-cards').prepend(card);
-  return Object.fromEntries([...card.querySelectorAll('[id]')].map(node => [node.id, node]));
+  return fields;
 }
 
 let fields, lastSolution;
