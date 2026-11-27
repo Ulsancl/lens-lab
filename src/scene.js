@@ -302,7 +302,7 @@ export class LensScene {
     this.setRaster(this.screenMesh, projection, 'screenRaster'); this.setRaster(this.targetMesh, target, 'targetRaster');
     if (!previous || [...Object.keys(previous), ...Object.keys(solution.config)].some(key => solution.config[key] !== previous[key])) this.updateRays(solution);
     this.rays.visible = this.view.rays; this.focusMarker.visible = this.view.focus; this.modelPlane.visible = this.view.structure;
-    this.highlight(); this.note.textContent = this.view.structure ? '청록 원: 계산 구경 0 mm · 조리개 −3 mm와 코팅은 구조 표현 · 내부 광선 생략'
+    this.highlight(); this.note.textContent = this.view.structure ? '청록 원: 계산 구경 0 mm · 실제 조리개 −3 mm와 코팅은 구조 표현 · 내부 광선 생략'
       : '표적·스크린을 끌어 이동 · 조립체 내부 광선은 표시를 생략합니다';
     const image = solution.image;
     this.focusReadout.textContent = image.kind === 'infinity' ? '유한 초점 없음 · 출사 광선 평행' : `${image.kind === 'virtual' ? '허상 · 역연장 위치' : '실상 위치'} ${image.distanceMm.toFixed(1)} mm${image.onBench ? '' : ' · 레일 밖'}`;
