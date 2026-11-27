@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteProject, WINDOWS_RETRY_DELAYS_MS } from '../desktop/atomic-save.cjs';
+import { runWindowsPowerShell } from '../desktop/windows-powershell.cjs';
 
 const previous = '{"original":"보존할 실험"}', replacement = '{"replacement":"완료된 실험"}';
 const scratchRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'output', 'atomic-save-tests');
@@ -23,6 +24,7 @@ async function fixture(t) {
     assert.equal(filename, target);
     const stat = await fs.lstat(filename);
     if (!stat.isFile() || stat.isSymbolicLink()) throw failure('UNSAFE_TARGET');
+    return stat;
   };
   return { directory, target, validateTarget };
 }
@@ -96,4 +98,47 @@ test('a failed flush closes and removes the incomplete sibling without touching 
   await assert.rejects(atomicWriteProject(value.target, replacement, { operations, validateTarget: value.validateTarget }), { code: 'EIO' });
   assert.equal(closed, true); assert.equal(renamed, false);
   await unchangedAndClean(value);
+});
+
+test('Windows saves preserve the target DACL and new files start private', { skip: process.platform !== 'win32' }, async t => {
+  const value = await fixture(t);
+  const created = path.join(value.directory, 'new 실험.json');
+  const aclSetup = `
+    $ErrorActionPreference = 'Stop'
+    $request = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())))
+    $dir = Get-Acl -LiteralPath $request.directory
+    $everyone = [Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+    $dir.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($everyone, 'ReadAndExecute',
+        'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    Set-Acl -LiteralPath $request.directory -AclObject $dir
+    $file = Get-Acl -LiteralPath $request.target
+    $file.SetAccessRuleProtection($true, $false)
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $file.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow'))
+    $sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
+    $file.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'Read', 'Allow'))
+    Set-Acl -LiteralPath $request.target -AclObject $file
+    $file = Get-Acl -LiteralPath $request.target
+    [IO.File]::WriteAllText($request.snapshot, $file.GetSecurityDescriptorSddlForm('Access'))
+  `;
+  const snapshot = path.join(value.directory, 'original-acl.txt');
+  await runWindowsPowerShell(aclSetup, { ...value, snapshot });
+  await atomicWriteProject(value.target, replacement, { validateTarget: value.validateTarget });
+  await atomicWriteProject(created, replacement, { validateTarget: async () => null });
+  await runWindowsPowerShell(`
+    $ErrorActionPreference = 'Stop'
+    $request = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())))
+    $file = Get-Acl -LiteralPath $request.target
+    if ($file.GetSecurityDescriptorSddlForm('Access') -cne [IO.File]::ReadAllText($request.snapshot)) {
+        throw 'Target DACL changed'
+    }
+    $file = Get-Acl -LiteralPath $request.created
+    $trusted = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $unexpected = $file.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+        Where-Object { $_.IdentityReference.Value -ne $trusted }
+    if (-not $file.AreAccessRulesProtected -or $unexpected) { throw 'New file inherited shared access' }
+  `, { ...value, snapshot, created });
+  assert.equal(await fs.readFile(value.target, 'utf8'), replacement);
+  assert.equal(await fs.readFile(created, 'utf8'), replacement);
+  assert.deepEqual((await fs.readdir(value.directory)).sort(), ['experiment.json', 'new 실험.json', 'original-acl.txt']);
 });

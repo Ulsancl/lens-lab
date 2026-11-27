@@ -6,7 +6,7 @@ import { lensDetail } from './detail-model.js';
 import { renderLensDetails } from './detail-panel.js';
 import { CONFIG_BOUNDS, DEFAULT_CONFIG, DEFAULT_TARGET_CONFIG, normalizeConfig, solveOptics, targetGeometry } from './physics.js';
 import { makeTarget, makeProjection } from './projection.js';
-import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW } from './project.js';
+import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW, MAX_PROJECT_BYTES } from './project.js';
 import { COMPONENTS } from './geometry.js';
 import { LensScene } from './scene.js';
 
@@ -156,10 +156,13 @@ $$('[data-lesson]').forEach(button=>button.addEventListener('click',()=>startLes
 $('#pin-comparison').addEventListener('click',pinComparison);$('#clear-comparison').addEventListener('click',()=>{comparison=null;refresh(false);scheduleSave();});$('#new-project').addEventListener('click',newExperiment);
 $('#show-current').addEventListener('click',()=>{projectionMode='current';renderProjectionMode();});$('#show-saved').addEventListener('click',()=>{if(comparison){projectionMode='saved';renderProjectionMode();}});$('#show-observation').addEventListener('click',()=>{$('.observation').scrollIntoView({block:'start'});});
 $('#undo-new').addEventListener('click',()=>{if(!previous||busy)return;const saved=previous;previous=null;readProject(saved.project,saved.guide);$('#undo-new').hidden=true;toast('직전 실험과 안내를 복원했습니다.');});
-$('#save-project').addEventListener('click',saveFile);$('#open-project').addEventListener('click',openFile);$('#project-file').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file||busy)return;flushDrag();setBusy(true);try{if(file.size>10*1024*1024)throw new Error('실험 파일은 10 MiB 이하여야 합니다.');const saved=parseProject(await file.text());remember();readProject(saved);toast('저장한 광학 실험을 복원했습니다.');}catch(error){toast(`열지 못했습니다. ${error.message}`);}finally{event.target.value='';setBusy(false);}});
+$('#save-project').addEventListener('click',saveFile);$('#open-project').addEventListener('click',openFile);$('#project-file').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file||busy)return;flushDrag();setBusy(true);try{if(file.size>MAX_PROJECT_BYTES)throw new Error('실험 파일은 10 MiB 이하여야 합니다.');const saved=parseProject(await file.text());remember();readProject(saved);toast('저장한 광학 실험을 복원했습니다.');}catch(error){toast(`열지 못했습니다. ${error.message}`);}finally{event.target.value='';setBusy(false);}});
 $('#recover-original').addEventListener('click',()=>{if(recoveredRaw!==null)browserDownload(recoveredRaw,'lens-lab-original.txt','text/plain;charset=utf-8');});$('#show-help').addEventListener('click',showHelp);$('#close-help').addEventListener('click',()=>$('#help-dialog').close());
 desktop?.onCommand(command=>{if(busy)return;if(command==='new-project')newExperiment();else if(command==='open-project')openFile();else if(command==='save-project')saveFile();else if(command==='toggle-rays'){view.rays=!view.rays;syncControls();refresh();scheduleSave();}else if(command==='focus')toggleFocus();else if(command==='help')showHelp();});
 window.addEventListener('beforeunload',()=>{flushDrag();saveLocal();});document.addEventListener('visibilitychange',()=>{if(document.hidden){flushDrag();saveLocal();}});
-window.lensLab={getState:()=>structuredClone({config,solution,view,comparison,detail:lensDetail(config,solution),focused}),project:()=>structuredClone(capture()),loadProject:raw=>{const saved=parseProject(raw);readProject(saved);return structuredClone(capture());},sceneDebug:()=>scene?.getDebug()??null,guide:()=>structuredClone(guide),components:()=>COMPONENTS.map(part=>({...part}))};
-window.render_game_to_text=()=>JSON.stringify({...window.lensLab.getState(),coordinates:'Optical lengths in mm, 3D in m; lens x=0, optical axis +X, target -X, screen +X, vertical +Y.'});
-window.advanceTime=()=>{flushDrag();scene?.render();return window.render_game_to_text();};
+$('#app-version').textContent=import.meta.env.LENS_VERSION;
+if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
+  window.lensLab={getState:()=>structuredClone({config,solution,view,comparison,detail:lensDetail(config,solution),focused}),project:()=>structuredClone(capture()),loadProject:raw=>{const saved=parseProject(raw);readProject(saved);return structuredClone(capture());},sceneDebug:()=>scene?.getDebug()??null,guide:()=>structuredClone(guide),components:()=>COMPONENTS.map(part=>({...part}))};
+  window.render_game_to_text=()=>JSON.stringify({...window.lensLab.getState(),coordinates:'Optical lengths in mm, 3D in m; lens x=0, optical axis +X, target -X, screen +X, vertical +Y.'});
+  window.advanceTime=()=>{flushDrag();scene?.render();return window.render_game_to_text();};
+}

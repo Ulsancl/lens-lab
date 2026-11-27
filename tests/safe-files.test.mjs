@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readInput, writeArtifact, copyInput, publishDirectory, stagingDirectory } from '../scripts/safe-files.mjs';
+import { buildWeb } from '../scripts/build-web.mjs';
 
 test('packaging reads reject file and directory symlinks before exposing outside bytes', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-input-'));
@@ -30,4 +31,26 @@ test('artifacts replace regular files atomically and directory publication keeps
   fs.mkdirSync(destination); fs.writeFileSync(path.join(destination, 'app'), 'old');
   publishDirectory(root, source, destination);
   assert.equal(readInput(root, path.join(destination, 'app')).toString(), 'new');
+});
+
+test('the web build rejects linked inputs and outputs and keeps the previous bundle', async t => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lens-build-test-')));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, 'workspace'), outside = path.join(base, 'outside');
+  fs.mkdirSync(root);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'private.txt'), 'fixture outside workspace');
+  const link = process.platform === 'win32' ? 'junction' : 'dir';
+  const dist = path.join(root, 'dist');
+  fs.symlinkSync(outside, dist, link);
+  await assert.rejects(buildWeb({ root }), /Symlinks|canonical/);
+  fs.unlinkSync(dist);
+  fs.mkdirSync(dist);
+  fs.writeFileSync(path.join(dist, 'index.html'), 'previous bundle');
+  fs.writeFileSync(path.join(root, 'index.html'), 'new source');
+  fs.mkdirSync(path.join(root, 'src'));
+  fs.symlinkSync(outside, path.join(root, 'public'), link);
+  await assert.rejects(buildWeb({ root }), /Symlinks|canonical/);
+  assert.equal(fs.readFileSync(path.join(dist, 'index.html'), 'utf8'), 'previous bundle');
+  assert.equal(fs.readFileSync(path.join(outside, 'private.txt'), 'utf8'), 'fixture outside workspace');
 });

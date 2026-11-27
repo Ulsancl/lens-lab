@@ -6,6 +6,14 @@ import { DEFAULT_CONFIG, MODEL_VERSION, solveOptics } from '../src/physics.js';
 import { COMPONENTS } from '../src/geometry.js';
 
 const roundtrip = value => parseProject(serializeProject(value));
+
+test('legacy v1 whitespace and escaped comparison text remain readable with bounded parsing', () => {
+  const project = createProject({ comparison: { label: '광학 "복원" {테스트}, 쉼표', config: DEFAULT_CONFIG } });
+  const canonical = serializeProject(project);
+  assert.deepEqual(parseProject('\ufeff' + ' '.repeat(256 * 1024) + canonical), project);
+  assert.throws(() => parseProject(' '.repeat(64 * 1024) + '['.repeat(9) + '0' + ']'.repeat(9)),
+    { code: 'PROJECT_TOO_COMPLEX' });
+});
 const invalid = (edit, code) => {
   const project = createProject(); edit(project);
   const original = JSON.stringify(project);

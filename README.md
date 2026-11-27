@@ -41,7 +41,7 @@ npm ci
 npm run dev
 ```
 
-`npm test`는 광학·투영·기하·저장·원자적 파일 저장 검사를 실행합니다. `npm run test:browser`는 세 실험과 조작·저장을, `npm run test:consumer`는 구조 관찰 화면을, `npm run test:detail`은 허용 구간·계산값·실제 구조와 좁은 화면을 검사합니다. `npm run build`는 웹 산출물, `npm run desktop`은 독립 데스크톱 창, `npm run package:desktop`은 Windows x64 설치 파일과 SHA-256 파일을 만듭니다. 네이티브 검사는 `node scripts/desktop.mjs prepare-test`로 번들을 준비한 뒤 `npm run test:desktop`을 실행합니다. 실제 화면을 쓰는 브라우저·네이티브 검사는 동시에 실행하지 마세요.
+`npm test`는 광학·투영·기하·저장·원자적 파일 저장 검사를 실행합니다. `npm run test:browser`는 세 실험과 조작·저장을, `npm run test:consumer`는 구조 관찰 화면을, `npm run test:detail`은 허용 구간·계산값·실제 구조와 좁은 화면을 검사합니다. `npm run build`는 웹 산출물, `npm run desktop`은 독립 데스크톱 창, `npm run package:desktop`은 Windows x64 설치 파일과 SHA-256 파일을 만듭니다. `npm run test:desktop`은 검사 번들을 준비하고 네이티브 검사를 실행합니다. 실제 화면을 쓰는 브라우저·네이티브 검사는 동시에 실행하지 마세요.
 
 설치 앱은 로컬 파일로 실행합니다. 개발 의존성 설치와 빌드 준비에는 인터넷이 필요할 수 있습니다. 대상은 Windows 11 x64이며 실제 호환성은 각 검사 기록을 따릅니다. 설치 파일은 코드 서명과 자동 업데이트를 제공하지 않습니다. 새 버전은 실험을 저장하고 앱을 닫은 뒤 설치 파일로 수동 업데이트합니다.
 

@@ -3,10 +3,17 @@
   "productName": "Lens Lab",
   "copyright": "Lens Lab",
   "asar": true,
+  "electronFuses": {
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false,
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
   "publish": null,
   "electronDist": "node_modules/electron/dist",
   "directories": { "output": "release/windows", "buildResources": "desktop/assets" },
-  "files": ["desktop/**/*.cjs", "desktop/assets/app.ico", "src/project.js", "src/physics.js", "src/geometry.js", "dist/**/*", "package.json"],
+  "files": ["desktop/**/*.cjs", "desktop/windows-save.ps1", "desktop/assets/app.ico", "src/project.js", "src/physics.js", "src/geometry.js", "dist/**/*", "package.json"],
   "extraResources": [
     { "from": "LICENSE.txt", "to": "LICENSE.txt" },
     { "from": "docs", "to": "docs", "filter": ["*.md"] },

@@ -5,7 +5,7 @@ export { DEFAULT_VIEW };
 export const projectType = 'lens-lab-project';
 export const projectVersion = 1;
 export const projectModelVersion = MODEL_VERSION;
-const MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_PROJECT_BYTES = 10 * 1024 * 1024;
 const flagKeys = ['rays', 'focus', 'structure', 'labels'];
 const partIds = new Set(COMPONENTS.map(part => part.id));
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -97,10 +97,29 @@ export function createProject(input = {}) {
 }
 export function parseProject(text) {
   if (typeof text !== 'string') fail('실험 파일은 JSON 텍스트여야 합니다.', 'INVALID_JSON');
-  if (text.length > MAX_BYTES || new TextEncoder().encode(text).byteLength > MAX_BYTES) fail('실험 파일은 10 MiB 이하여야 합니다.', 'PROJECT_TOO_LARGE');
+  if (text.length > MAX_PROJECT_BYTES || new TextEncoder().encode(text).byteLength > MAX_PROJECT_BYTES) {
+    fail('실험 파일은 10 MiB 이하여야 합니다.', 'PROJECT_TOO_LARGE');
+  }
+  // Keep old, generously formatted v1 files readable while limiting the
+  // number of JSON values that parsing can allocate from a large input.
+  if (text.length > 64 * 1024) checkProjectStructure(text);
   let value;
   try { value = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); }
   catch { fail('JSON 실험 파일을 읽을 수 없습니다.', 'INVALID_JSON'); }
   return validateProject(value);
+}
+
+function checkProjectStructure(text) {
+  let quoted = false, depth = 0, separators = 0;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (quoted && character === '\\') { index++; continue; }
+    if (character === '"') quoted = !quoted;
+    if (quoted) continue;
+    if (character === '{' || character === '[') depth++;
+    if (character === '}' || character === ']') depth--;
+    if (character === ':' || character === ',') separators++;
+    if (depth > 8 || separators > 512) fail('실험 파일의 항목 수가 너무 많습니다.', 'PROJECT_TOO_COMPLEX');
+  }
 }
 export function serializeProject(project) { return JSON.stringify(validateProject(project), null, 2); }
